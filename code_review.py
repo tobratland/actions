@@ -140,6 +140,7 @@ def get_position_in_diff(diff, target_line):
     return None
 
 def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_token):
+    from github import GithubException  # Import GithubException for better error handling
     g = Github(github_token)
     repo = g.get_repo(repo_full_name)
     pull_request = repo.get_pull(pr_number)
@@ -149,7 +150,6 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
         line = comment['line']
         body = comment['comment']
 
-        # Get the diff for the specific file
         file_diff = diffs.get(filename)
         if not file_diff:
             print(f"No diff found for {filename}")
@@ -168,8 +168,12 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
                 position=position
             )
             print(f"Comment posted on {filename} line {line}")
+        except GithubException as e:
+            print(f"Error posting comment on {filename} line {line}: {e.data}")
+            print(f"Status: {e.status}")
+            print(f"Headers: {e.headers}")
         except Exception as e:
-            print(f"Error posting comment on {filename} line {line}: {e}")
+            print(f"Error posting comment on {filename} line {line}: {str(e)}")
 
 def main():
     try:
