@@ -161,6 +161,7 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
     # Re-fetch the PR to ensure we have the latest head commit
     pull_request = repo.get_pull(pr_number)
     commit_id = pull_request.head.sha
+    commit = repo.get_commit(commit_id) 
     print("[DEBUG] Refreshed commit_id to match pr.head.sha:", commit_id)
 
     print("[DEBUG] Posting comments...")
@@ -196,7 +197,7 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
         try:
             pull_request.create_review_comment(
                 body=body,
-                commit_id=commit_id,
+                commit_id=commit,
                 path=filename,
                 position=position
             )
