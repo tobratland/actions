@@ -73,7 +73,7 @@ def get_changed_files(repo, base_branch, head_branch, file_extensions):
 
 def review_code_with_llm(filename, diff_content, manual_content, example_contents, api_key):
     prompt = f"""
-You are a code reviewer. Below is the developer manual and examples:
+You are a code reviewer. Below is the developer manual and examples, if they are empty base your review on best practice for safe and efficient code:
 
 Developer Manual:
 {manual_content}
@@ -105,7 +105,7 @@ Provide your feedback in the following JSON format:
         'Authorization': f'Bearer {api_key}',
     }
     payload = {
-        "model": "gpt-3.5-turbo",
+        "model": "gpt-4o",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.2,
     }
@@ -159,17 +159,23 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
             continue
 
         try:
-            pull_request.create_issue_comment(
+            pull_request.create_review_comment(
                 body=body,
+                commit_id=commit_id,
+                path=filename,
+                position=position
             )
             print(f"Comment posted on {filename} line {line}")
         except GithubException as e:
             print(f"Error posting comment on {filename} line {line}: {e.data}")
             print(f"Status: {e.status}")
             print(f"Headers: {e.headers}")
+            sys.exit(1)  # Exit immediately with a non-zero code
 
         except Exception as e:
             print(f"Error posting comment on {filename} line {line}: {str(e)}")
+            sys.exit(1)  # Exit with a non-zero code
+
 
 def main():
     try:
