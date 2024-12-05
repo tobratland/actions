@@ -5,55 +5,72 @@ import requests
 from github import Github
 from git import Repo
 
-def get_contextual_files():
+
+def get_contextual_files(repo_path):
     manual_content = ''
     example_contents = ''
 
+    # Use the GITHUB_WORKSPACE environment variable
+    repo_path = os.environ.get('GITHUB_WORKSPACE', '/github/workspace')
+
     # Read developer manual
-    manual_path = os.path.join(os.getcwd(), 'developer_manual.md')
+    manual_path = os.path.join(repo_path, 'developer_manual.md')
     if os.path.exists(manual_path):
         with open(manual_path, 'r') as f:
             manual_content = f.read()
+    else:
+        print("No developer_manual.md found.")
 
     # Read example files
-    examples_path = os.path.join(os.getcwd(), 'examples')
+    examples_path = os.path.join(repo_path, 'examples')
     if os.path.exists(examples_path):
         for root, dirs, files in os.walk(examples_path):
             for file in files:
                 with open(os.path.join(root, file), 'r') as f:
                     content = f.read()
                     example_contents += f"\n### Example File: {file}\n{content}"
+    else:
+        print("No examples directory found.")
 
     return manual_content, example_contents
 
-def get_changed_files(repo_path, base_branch, head_branch):
+def get_changed_files(repo_path, base_branch, head_branch, file_extensions):
     repo = Repo(repo_path)
     origin = repo.remotes.origin
 
     # Fetch all branches
     origin.fetch()
 
-    # Checkout the head branch
-    repo.git.checkout(head_branch)
-
-    # Ensure the base branch is available locally
-    if base_branch not in repo.branches:
+    # Ensure the base branch exists locally
+    if base_branch not in repo.heads:
         print(f"Base branch {base_branch} not found locally. Creating it.")
         repo.create_head(base_branch, origin.refs[base_branch])
     else:
-        repo.git.checkout(base_branch)
+        repo.heads[base_branch].set_tracking_branch(origin.refs[base_branch])
+
+    # Checkout the head branch
+    repo.git.checkout(head_branch)
 
     # Get the common ancestor
     base_commit = repo.merge_base(base_branch, head_branch)
     if not base_commit:
         raise Exception(f"Could not find common ancestor between {base_branch} and {head_branch}")
 
-    print(f"Base commit: {base_commit[0].hexsha}")
-
     # Get the diff
-    diff = repo.git.diff(f'{base_commit[0].hexsha}..{head_branch}', '--unified=0')
-    return diff
+    diff_index = base_commit[0].diff(head_branch, create_patch=True)
 
+    # Filter diffs by file extension
+    filtered_diffs = []
+    for diff in diff_index:
+        if diff.a_path:
+            file_path = diff.a_path
+        else:
+            file_path = diff.b_path
+
+        if any(file_path.endswith(ext) for ext in file_extensions):
+            filtered_diffs.append(diff)
+
+    return filtered_diffs
 
 def review_code_with_llm(filename, diff_content, manual_content, example_contents, api_key):
     prompt = f"""
