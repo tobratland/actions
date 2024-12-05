@@ -213,13 +213,13 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
             print(f"Comment posted on {filename} line {line}")
         except GithubException as e:
             print(f"Error posting comment on {filename} line {line}: {e.data}")
-            print(f"Status: {e.status}")
-            print(f"Headers: {e.headers}")
-            sys.exit(1)  # Exit immediately with a non-zero code
+            # Remove sys.exit(1) here temporarily to continue processing
 
         except Exception as e:
-            print(f"Error posting comment on {filename} line {line}: {str(e)}")
-            sys.exit(1)  # Exit with a non-zero code
+            print("[DEBUG] Generic exception encountered while posting comment")
+            print(f"[DEBUG] Exception type: {type(e)}")
+            print("[DEBUG] Exception content:", str(e))
+            # Remove sys.exit(1) here temporarily to continue processing
 
 def main():
     try:
