@@ -6,6 +6,7 @@ from github import Github
 from git import Git, Repo
 import re
 
+
 def get_contextual_files(repo_path):
     manual_content = ""
     example_contents = ""
@@ -33,38 +34,6 @@ def get_contextual_files(repo_path):
 
     return manual_content, example_contents
 
-def get_file_with_changes(repo, filename, base_branch, head_branch):
-    """Get the complete file content along with information about changed lines."""
-    try:
-        # Get the current (new) version of the file
-        current_content = repo.get_contents(filename, ref=head_branch).decoded_content.decode('utf-8')
-        
-        # Get the diff to identify changed lines
-        base_commit = repo.merge_base(base_branch, head_branch)[0]
-        diff = base_commit.diff(head_branch, paths=[filename])[0]
-        
-        # Parse the diff to get changed line numbers
-        changed_lines = set()
-        current_line = 0
-        for line in diff.diff.decode('utf-8').split('\n'):
-            if line.startswith('@@'):
-                match = re.search(r'\+(\d+)', line)
-                if match:
-                    current_line = int(match.group(1)) - 1
-            elif line.startswith('+'):
-                current_line += 1
-                changed_lines.add(current_line)
-            elif not line.startswith('-'):
-                current_line += 1
-        
-        return {
-            'content': current_content,
-            'changed_lines': sorted(list(changed_lines)),
-            'diff': diff.diff.decode('utf-8')
-        }
-    except Exception as e:
-        print(f"[DEBUG] Error getting file content: {e}")
-        return None
 
 def get_changed_files(repo, base_branch, head_branch, file_extensions):
     origin = repo.remotes.origin
@@ -82,25 +51,55 @@ def get_changed_files(repo, base_branch, head_branch, file_extensions):
 
     base_commit = repo.merge_base(base_branch, head_branch)
     if not base_commit:
-        raise Exception(f"Could not find common ancestor between {base_branch} and {head_branch}")
+        raise Exception(
+            f"Could not find common ancestor between {base_branch} and {head_branch}"
+        )
+
+    print(f"[DEBUG] Found common ancestor: {base_commit[0].hexsha}")
 
     diff_index = base_commit[0].diff(head_branch, create_patch=True)
 
     print("[DEBUG] Filtering diffs by file extensions:", file_extensions)
-    filtered_files = []
+    filtered_diffs = []
     for diff in diff_index:
-        file_path = diff.a_path or diff.b_path
+        if diff.a_path:
+            file_path = diff.a_path
+        else:
+            file_path = diff.b_path
+
         if any(file_path.endswith(ext) for ext in file_extensions):
-            print(f"[DEBUG] Including file: {file_path}")
-            file_info = get_file_with_changes(repo, file_path, base_branch, head_branch)
-            if file_info:
-                filtered_files.append((file_path, file_info))
+            print(f"[DEBUG] Including diff for file: {file_path}")
+            filtered_diffs.append(diff)
         else:
             print(f"[DEBUG] Skipping file not matching extensions: {file_path}")
 
-    return filtered_files
+    return filtered_diffs
 
-def review_code_with_llm(filename, file_info, manual_content, example_contents, api_key):
+
+def review_code_with_llm(
+    filename, diff_content, manual_content, example_contents, api_key
+):
+    # Add line numbers to diff content
+    numbered_diff = []
+    current_line = 0
+    for line in diff_content.split("\n"):
+        if line.startswith("@@"):
+            # Parse the @@ line to get new starting line number
+            match = re.search(r"\+(\d+)", line)
+            if match:
+                current_line = int(match.group(1)) - 1
+            numbered_diff.append(line)
+        elif line.startswith("+"):
+            current_line += 1
+            numbered_diff.append(f"{current_line:4d} | {line}")
+        elif line.startswith("-"):
+            numbered_diff.append(line)
+        else:
+            current_line += 1
+            numbered_diff.append(f"{current_line:4d} | {line}")
+
+    numbered_diff_content = "\n".join(numbered_diff)
+
     prompt = f"""
 You are a code reviewer. Below is the developer manual and examples. If they are empty, base your review on best practices for safe and efficient code:
 
@@ -110,31 +109,25 @@ Developer Manual:
 Examples:
 {example_contents}
 
-Now, review the following file. Focus on the changed lines (provided in the changed_lines list) while considering the complete file context:
+Now, review the following code diff. Line numbers are shown at the start of each line:
 
 File: {filename}
-Complete File Content:
-{file_info['content']}
-
-Changed Lines: {file_info['changed_lines']}
-
-Diff for reference:
-{file_info['diff']}
+Diff:
+{numbered_diff_content}
 
 Provide your feedback in the following JSON format:
 {{
   "filename": "{filename}",
   "comments": [
     {{
-      "line": integer,  # Line number in the new code
-      "comment": "string"  # Your review comment focusing on the changes in context
+      "line": integer,  # Use the line numbers shown in the diff
+      "comment": "string"
     }},
     ...
   ]
 }}
 """
 
-    print("[DEBUG] Sending request to LLM for file:", filename)
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}",
@@ -146,13 +139,115 @@ Provide your feedback in the following JSON format:
     }
 
     response = requests.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers=headers,
-        json=payload
+        "https://api.openai.com/v1/chat/completions", headers=headers, json=payload
     )
 
-    print("[DEBUG] LLM Response status code:", response.status_code)
     return response.json()
+
+
+def get_position_in_diff(diff, target_line):
+    print("[DEBUG] Calculating position in diff for target_line:", target_line)
+    diff_lines = diff.split("\n")
+    position = None
+    current_line = None
+    current_position = 0
+
+    for line in diff_lines:
+        # Reset position counting at each hunk header
+        if line.startswith("@@"):
+            match = re.search(r"\+(\d+)(?:,(\d+))?", line)
+            if match:
+                current_line = int(match.group(1)) - 1
+                current_position = 0
+            continue
+
+        current_position += 1
+
+        if line.startswith("+"):
+            current_line += 1
+            if current_line == target_line:
+                position = current_position
+                break
+        elif line.startswith("-"):
+            # Don't increment current_line for removed lines
+            continue
+        else:
+            # Context line
+            current_line += 1
+
+    if position is not None:
+        print(f"[DEBUG] Found position {position} for line {target_line}")
+        # Print surrounding context for verification
+        start_idx = max(0, diff_lines.index(line) - 2)
+        end_idx = min(len(diff_lines), diff_lines.index(line) + 3)
+        print("[DEBUG] Context around found position:")
+        for i in range(start_idx, end_idx):
+            print(f"  {diff_lines[i]}")
+    else:
+        print(f"[DEBUG] Could not find position for line {target_line}")
+
+    return position
+
+
+def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_token):
+    from github import GithubException
+
+    g = Github(github_token)
+    repo = g.get_repo(repo_full_name)
+
+    # Re-fetch the PR to ensure we have the latest head commit
+    pull_request = repo.get_pull(pr_number)
+    commit_id = pull_request.head.sha
+    commit = repo.get_commit(commit_id)
+    print("[DEBUG] Refreshed commit_id to match pr.head.sha:", commit_id)
+
+    print("[DEBUG] Posting comments...")
+    print(
+        f"[DEBUG] PR Number: {pr_number}, commit_id: {commit_id}, repo_full_name: {repo_full_name}"
+    )
+    print("[DEBUG] pr.head.sha:", pull_request.head.sha)
+
+    for comment in comments:
+        filename = comment["filename"]
+        line = comment["line"]
+        body = comment["comment"]
+
+        print(f"[DEBUG] Attempting to post comment on {filename} at line {line}")
+        file_diff = diffs.get(filename)
+        if not file_diff:
+            print(f"[DEBUG] No diff found for {filename}, skipping this comment.")
+            continue
+
+        position = get_position_in_diff(file_diff, line)
+        print(f"[DEBUG] Computed position for file {filename}, line {line}: {position}")
+
+        if position is None:
+            print(
+                f"[DEBUG] Could not find position for file {filename} line {line}, skipping this comment."
+            )
+            continue
+
+        # Show diff context around the computed position for debugging
+        diff_lines = file_diff.split("\n")
+        start_context = max(0, position - 5)
+        end_context = min(len(diff_lines), position + 5)
+        print("[DEBUG] Diff context around computed position:")
+        for c_idx in range(start_context, end_context):
+            print(f"   {c_idx}: {diff_lines[c_idx]}")
+
+        try:
+            pull_request.create_review_comment(
+                body=body, commit_id=commit, path=filename, position=position
+            )
+            print(f"Comment posted successfully on {filename} line {line}")
+        except GithubException as e:
+            print(f"GitHub API Error: {e.status}, {e.data}")
+        except Exception as e:
+            print("[DEBUG] Generic exception encountered while posting comment")
+            print("[DEBUG] Exception type:", type(e))
+            print("[DEBUG] Exception content:", str(e))
+            # Not exiting here, continuing to next comment
+
 
 def main():
     try:
@@ -182,7 +277,9 @@ def main():
         head_branch = pr.head.ref
         commit_id = pr.head.sha
 
-        print(f"[DEBUG] PR Number: {pr_number}, Base Branch: {base_branch}, Head Branch: {head_branch}, Commit ID: {commit_id}")
+        print(
+            f"[DEBUG] PR Number: {pr_number}, Base Branch: {base_branch}, Head Branch: {head_branch}, Commit ID: {commit_id}"
+        )
 
         repo_path = "/github/workspace"
         os.chdir(repo_path)
@@ -191,23 +288,35 @@ def main():
         git_cmd.config("--global", "--add", "safe.directory", repo_path)
 
         repo_git = Repo(repo_path)
-        changed_files = get_changed_files(repo_git, base_branch, head_branch, file_extensions)
+        diffs = get_changed_files(repo_git, base_branch, head_branch, file_extensions)
+
         manual_content, example_contents = get_contextual_files(repo_path)
 
         all_comments = []
         diffs_by_file = {}
-        
-        for filename, file_info in changed_files:
+        for diff in diffs:
+            if diff.a_path:
+                filename = diff.a_path
+            else:
+                filename = diff.b_path
+
             print(f"Reviewing {filename}...")
-            diffs_by_file[filename] = file_info['diff']
+            diff_content = diff.diff.decode("utf-8", errors="replace")
+            diffs_by_file[filename] = diff_content
+
+            print("[DEBUG] Diff content snippet for", filename)
+            for line_idx, dline in enumerate(diff_content.split("\n")[:10]):
+                print(f"   {line_idx}: {dline}")
 
             llm_response = review_code_with_llm(
                 filename=filename,
-                file_info=file_info,
+                diff_content=diff_content,
                 manual_content=manual_content,
                 example_contents=example_contents,
                 api_key=openai_api_key,
             )
+
+            print("[DEBUG] LLM response:", llm_response)
 
             try:
                 llm_text = llm_response["choices"][0]["message"]["content"]
@@ -215,6 +324,8 @@ def main():
                 json_end = llm_text.rfind("}") + 1
                 llm_json_str = llm_text[json_start:json_end]
                 feedback = json.loads(llm_json_str)
+
+                print("[DEBUG] Parsed feedback JSON:", feedback)
 
                 comments = feedback.get("comments", [])
                 for c in comments:
@@ -234,10 +345,13 @@ def main():
             commit_id=commit_id,
             github_token=github_token,
         )
+        print(f"[DEBUG] PR head commit SHA: {pr.head.sha}")
+        print(f"[DEBUG] Using commit_id: {commit_id}")
 
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
