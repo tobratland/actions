@@ -4,7 +4,7 @@ import json
 import requests
 from github import Github
 from git import Git, Repo
-
+import re
 
 def get_contextual_files(repo_path):
     manual_content = ''
@@ -123,8 +123,6 @@ def get_position_in_diff(diff, target_line):
     current_line = None
     for line in diff.split('\n'):
         if line.startswith('@@'):
-            # Extract the starting line number
-            import re
             match = re.search(r'\+(\d+)(?:,(\d+))?', line)
             if match:
                 current_line = int(match.group(1)) - 1
@@ -161,17 +159,15 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
             continue
 
         try:
-            pull_request.create_review_comment(
+            pull_request.create_issue_comment(
                 body=body,
-                commit_id=commit_id,
-                path=filename,
-                position=position
             )
             print(f"Comment posted on {filename} line {line}")
         except GithubException as e:
             print(f"Error posting comment on {filename} line {line}: {e.data}")
             print(f"Status: {e.status}")
             print(f"Headers: {e.headers}")
+
         except Exception as e:
             print(f"Error posting comment on {filename} line {line}: {str(e)}")
 
