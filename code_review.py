@@ -101,7 +101,10 @@ def review_code_with_llm(
     numbered_diff_content = "\n".join(numbered_diff)
 
     prompt = f"""
-You are a code reviewer. Below is the developer manual and examples. If they are empty, base your review on best practices for safe and efficient code:
+You are a code reviewer. Base your review on best practices for safe and efficient code. Give examples where applicable, and reference the developer manual or examples, if they exist, for more information.
+Your code review should be actionable and provide clear feedback to the developer, including suggestions for improvement.
+
+Below is the developer manual and examples(they may be empty). :
 
 Developer Manual:
 {manual_content}
