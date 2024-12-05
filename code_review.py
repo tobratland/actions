@@ -10,7 +10,6 @@ def get_contextual_files(repo_path):
     manual_content = ''
     example_contents = ''
 
-    # Use the GITHUB_WORKSPACE environment variable
     repo_path = os.environ.get('GITHUB_WORKSPACE', '/github/workspace')
 
     # Read developer manual
@@ -19,7 +18,7 @@ def get_contextual_files(repo_path):
         with open(manual_path, 'r') as f:
             manual_content = f.read()
     else:
-        print("No developer_manual.md found.")
+        print("[DEBUG] No developer_manual.md found.")
 
     # Read example files
     examples_path = os.path.join(repo_path, 'examples')
@@ -30,41 +29,35 @@ def get_contextual_files(repo_path):
                     content = f.read()
                     example_contents += f"\n### Example File: {file}\n{content}"
     else:
-        print("No examples directory found.")
+        print("[DEBUG] No examples directory found.")
 
     return manual_content, example_contents
 
 def get_changed_files(repo, base_branch, head_branch, file_extensions):
     origin = repo.remotes.origin
-
-    print(f"[DEBUG] Fetching branches...")
+    print("[DEBUG] Fetching all branches...")
     origin.fetch()
 
-    # Ensure the base branch exists locally
     if base_branch not in repo.heads:
         print(f"[DEBUG] Base branch {base_branch} not found locally. Creating it.")
         repo.create_head(base_branch, origin.refs[base_branch])
     else:
         repo.heads[base_branch].set_tracking_branch(origin.refs[base_branch])
 
-    # Checkout the head branch
     print(f"[DEBUG] Checking out head branch: {head_branch}")
     repo.git.checkout(head_branch)
 
-    # Get the common ancestor
     base_commit = repo.merge_base(base_branch, head_branch)
     if not base_commit:
         raise Exception(f"Could not find common ancestor between {base_branch} and {head_branch}")
 
     print(f"[DEBUG] Found common ancestor: {base_commit[0].hexsha}")
 
-    # Get the diff between the base commit and head
     diff_index = base_commit[0].diff(head_branch, create_patch=True)
 
-    filtered_diffs = []
     print("[DEBUG] Filtering diffs by file extensions:", file_extensions)
+    filtered_diffs = []
     for diff in diff_index:
-        # Determine file path
         if diff.a_path:
             file_path = diff.a_path
         else:
@@ -80,7 +73,7 @@ def get_changed_files(repo, base_branch, head_branch, file_extensions):
 
 def review_code_with_llm(filename, diff_content, manual_content, example_contents, api_key):
     prompt = f"""
-You are a code reviewer. Below is the developer manual and examples, if they are empty base your review on best practice for safe and efficient code:
+You are a code reviewer. Below is the developer manual and examples. If they are empty, base your review on best practices for safe and efficient code:
 
 Developer Manual:
 {manual_content}
@@ -131,17 +124,15 @@ def get_position_in_diff(diff, target_line):
     print("[DEBUG] Calculating position in diff for target_line:", target_line)
     position = 0
     current_line = None
-
-    # Print a snippet of the diff for debugging
     diff_lines = diff.split('\n')
-    print("[DEBUG] Diff lines:")
+
+    print("[DEBUG] Diff lines (hunks and +/- lines):")
     for dl in diff_lines:
         if dl.startswith('@@') or dl.startswith('+') or dl.startswith('-'):
             print("   ", dl)
 
     for idx, line in enumerate(diff_lines):
         if line.startswith('@@'):
-            # Extract hunk info
             match = re.search(r'\+(\d+)(?:,(\d+))?', line)
             if match:
                 current_line = int(match.group(1)) - 1
@@ -150,55 +141,55 @@ def get_position_in_diff(diff, target_line):
             current_line += 1
             position += 1
             if current_line == target_line:
-                print(f"[DEBUG] Found position at {position} for line {target_line}")
+                print(f"[DEBUG] Found position {position} for line {target_line}")
                 return position
         elif line.startswith('-'):
-            # Removed line, does not advance position, but does it advance current_line?
-            # Actually, '-' lines do not affect 'position' since they are old lines removed.
-            # They do not increment position. But we still increment current_line for context lines?
-            # Actually, for unchanged lines (no +/-), we increment current_line as well.
-            # Here we skip incrementing position because it's not a newly added line.
+            # Removed line from old file, doesn't affect position of new lines
             continue
         else:
-            # Context line (no + or -)
+            # Context line (unchanged code)
             current_line += 1
 
     print("[DEBUG] No position found for target_line:", target_line)
     return None
 
 def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_token):
-    from github import GithubException  # Import GithubException for better error handling
+    from github import GithubException
     g = Github(github_token)
     repo = g.get_repo(repo_full_name)
+
+    # Re-fetch the PR to ensure we have the latest head commit
     pull_request = repo.get_pull(pr_number)
+    commit_id = pull_request.head.sha
+    print("[DEBUG] Refreshed commit_id to match pr.head.sha:", commit_id)
 
     print("[DEBUG] Posting comments...")
     print(f"[DEBUG] PR Number: {pr_number}, commit_id: {commit_id}, repo_full_name: {repo_full_name}")
+    print("[DEBUG] pr.head.sha:", pull_request.head.sha)
 
     for comment in comments:
         filename = comment['filename']
         line = comment['line']
         body = comment['comment']
 
-        print(f"[DEBUG] Attempting to post comment on {filename} at line {line} with body: {body}")
-
+        print(f"[DEBUG] Attempting to post comment on {filename} at line {line}")
         file_diff = diffs.get(filename)
         if not file_diff:
-            print(f"Could not find diff for {filename}, skipping comment.")
+            print(f"[DEBUG] No diff found for {filename}, skipping this comment.")
             continue
 
         position = get_position_in_diff(file_diff, line)
-        print(f"[DEBUG] Computed position: {position} for file {filename}, line {line}")
+        print(f"[DEBUG] Computed position for file {filename}, line {line}: {position}")
 
         if position is None:
-            print(f"Could not find position for file {filename} line {line}, skipping comment.")
+            print(f"[DEBUG] Could not find position for file {filename} line {line}, skipping this comment.")
             continue
 
-        # Print a small snippet of the diff around the target line for debugging
+        # Show diff context around the computed position for debugging
         diff_lines = file_diff.split('\n')
         start_context = max(0, position - 5)
         end_context = min(len(diff_lines), position + 5)
-        print("[DEBUG] Diff context around position:")
+        print("[DEBUG] Diff context around computed position:")
         for c_idx in range(start_context, end_context):
             print(f"   {c_idx}: {diff_lines[c_idx]}")
 
@@ -213,13 +204,12 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
             print(f"Comment posted on {filename} line {line}")
         except GithubException as e:
             print(f"Error posting comment on {filename} line {line}: {e.data}")
-            # Remove sys.exit(1) here temporarily to continue processing
-
+            # Not exiting here, continuing to next comment
         except Exception as e:
             print("[DEBUG] Generic exception encountered while posting comment")
-            print(f"[DEBUG] Exception type: {type(e)}")
+            print("[DEBUG] Exception type:", type(e))
             print("[DEBUG] Exception content:", str(e))
-            # Remove sys.exit(1) here temporarily to continue processing
+            # Not exiting here, continuing to next comment
 
 def main():
     try:
@@ -227,20 +217,17 @@ def main():
         file_types_input = sys.argv[2] if len(sys.argv) > 2 else ''
         github_token = os.environ.get('GITHUB_TOKEN')
 
-        # Parse file types
         if file_types_input:
             file_extensions = [ext.strip() for ext in file_types_input.split(',')]
         else:
             file_extensions = []
         print("[DEBUG] File extensions:", file_extensions)
 
-        # Initialize GitHub client
         g = Github(github_token)
         repo_full_name = os.environ['GITHUB_REPOSITORY']
         print("[DEBUG] Repo Full Name:", repo_full_name)
         repo = g.get_repo(repo_full_name)
 
-        # Get PR information
         event_path = os.environ['GITHUB_EVENT_PATH']
         print("[DEBUG] Reading event from:", event_path)
         with open(event_path, 'r') as f:
@@ -254,24 +241,17 @@ def main():
 
         print(f"[DEBUG] PR Number: {pr_number}, Base Branch: {base_branch}, Head Branch: {head_branch}, Commit ID: {commit_id}")
 
-        # Clone the repo
-        repo_path = '/github/workspace'  # Already checked out by actions/checkout
+        repo_path = '/github/workspace'
         os.chdir(repo_path)
 
-        # Configure Git to consider the directory safe
         git_cmd = Git(repo_path)
         git_cmd.config('--global', '--add', 'safe.directory', repo_path)
 
-        # Initialize Repo object
         repo_git = Repo(repo_path)
-
-        # Proceed with your Git operations
         diffs = get_changed_files(repo_git, base_branch, head_branch, file_extensions)
 
-        # Get contextual files
         manual_content, example_contents = get_contextual_files(repo_path)
 
-        # Prepare code snippets and review each file
         all_comments = []
         diffs_by_file = {}
         for diff in diffs:
@@ -284,7 +264,6 @@ def main():
             diff_content = diff.diff.decode('utf-8', errors='replace')
             diffs_by_file[filename] = diff_content
 
-            # Log a snippet of the diff for debugging
             print("[DEBUG] Diff content snippet for", filename)
             for line_idx, dline in enumerate(diff_content.split('\n')[:10]):
                 print(f"   {line_idx}: {dline}")
@@ -297,19 +276,15 @@ def main():
                 api_key=openai_api_key
             )
 
-            # Log the entire LLM response
             print("[DEBUG] LLM response:", llm_response)
 
-            # Parse LLM response
             try:
                 llm_text = llm_response['choices'][0]['message']['content']
-                # Sometimes the model might output text before or after the JSON. Extract JSON.
                 json_start = llm_text.find('{')
                 json_end = llm_text.rfind('}') + 1
                 llm_json_str = llm_text[json_start:json_end]
                 feedback = json.loads(llm_json_str)
 
-                # Log the parsed feedback
                 print("[DEBUG] Parsed feedback JSON:", feedback)
 
                 comments = feedback.get('comments', [])
@@ -318,11 +293,10 @@ def main():
                 all_comments.extend(comments)
             except Exception as e:
                 print(f"Error parsing LLM response for {filename}: {e}")
-                # Log the llm_text if parsing fails
-                print("[DEBUG] LLM text that failed to parse:", llm_text if 'llm_text' in locals() else "No llm_text variable")
+                if 'llm_text' in locals():
+                    print("[DEBUG] LLM text that failed to parse:", llm_text)
                 continue
 
-        # Post comments
         post_comments(
             comments=all_comments,
             diffs=diffs_by_file,
