@@ -7,6 +7,10 @@ on:
 jobs:
   code_review:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
