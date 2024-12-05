@@ -34,8 +34,7 @@ def get_contextual_files(repo_path):
 
     return manual_content, example_contents
 
-def get_changed_files(repo_path, base_branch, head_branch, file_extensions):
-    repo = Repo(repo_path)
+def get_changed_files(repo, base_branch, head_branch, file_extensions):
     origin = repo.remotes.origin
 
     # Fetch all branches
@@ -56,7 +55,7 @@ def get_changed_files(repo_path, base_branch, head_branch, file_extensions):
     if not base_commit:
         raise Exception(f"Could not find common ancestor between {base_branch} and {head_branch}")
 
-    # Get the diff
+    # Get the diff between the base commit and head
     diff_index = base_commit[0].diff(head_branch, create_patch=True)
 
     # Filter diffs by file extension
