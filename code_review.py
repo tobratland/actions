@@ -194,17 +194,15 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
             print(f"   {c_idx}: {diff_lines[c_idx]}")
 
         try:
-            print(f"[DEBUG] Creating review comment with commit_id={commit_id}, path={filename}, position={position}")
             pull_request.create_review_comment(
                 body=body,
                 commit_id=commit_id,
                 path=filename,
                 position=position
             )
-            print(f"Comment posted on {filename} line {line}")
+            print(f"Comment posted successfully on {filename} line {line}")
         except GithubException as e:
-            print(f"Error posting comment on {filename} line {line}: {e.data}")
-            # Not exiting here, continuing to next comment
+            print(f"GitHub API Error: {e.status}, {e.data}")
         except Exception as e:
             print("[DEBUG] Generic exception encountered while posting comment")
             print("[DEBUG] Exception type:", type(e))
@@ -305,6 +303,8 @@ def main():
             commit_id=commit_id,
             github_token=github_token
         )
+        print(f"[DEBUG] PR head commit SHA: {pr.head.sha}")
+        print(f"[DEBUG] Using commit_id: {commit_id}")
 
     except Exception as e:
         print(f"Error: {e}")
