@@ -1,0 +1,11 @@
+name: 'LLM Code Review'
+description: 'Uses OpenAI GPT to review code changes'
+inputs:
+  OPENAI_API_KEY:
+    description: 'OpenAI API Key'
+    required: true
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  args:
+    - ${{ inputs.OPENAI_API_KEY }}
