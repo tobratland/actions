@@ -159,8 +159,11 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
             continue
 
         try:
-            pull_request.create_issue_comment(
+            pull_request.create_review_comment(
                 body=body,
+                commit_id=commit_id,
+                path=filename,
+                position=position
             )
             print(f"Comment posted on {filename} line {line}")
         except GithubException as e:
