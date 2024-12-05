@@ -157,9 +157,15 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
 
 def main():
     try:
-        # Get inputs
         openai_api_key = sys.argv[1]
+        file_types_input = sys.argv[2] if len(sys.argv) > 2 else ''
         github_token = os.environ.get('GITHUB_TOKEN')
+
+        # Parse file types
+        if file_types_input:
+            file_extensions = [ext.strip() for ext in file_types_input.split(',')]
+        else:
+            file_extensions = []
 
         # Initialize GitHub client
         g = Github(github_token)
@@ -171,53 +177,38 @@ def main():
         with open(event_path, 'r') as f:
             event = json.load(f)
 
-        pr_number = event['number']
+        pr_number = event['pull_request']['number']
         pr = repo.get_pull(pr_number)
         base_branch = pr.base.ref
         head_branch = pr.head.ref
         commit_id = pr.head.sha
 
         # Clone the repo
-        repo_path = '/tmp/repo'
-        if not os.path.exists(repo_path):
-            os.makedirs(repo_path)
-        Repo.clone_from(pr.head.repo.clone_url, repo_path, branch=head_branch)
+        repo_path = '/github/workspace'  # Already checked out by actions/checkout
         os.chdir(repo_path)
 
-        # Get the diff of changed files
-        diff = get_changed_files(repo_path, base_branch, head_branch)
-
-        # Separate diffs by file
-        diffs_by_file = {}
-        current_file = None
-        current_diff = []
-        for line in diff.split('\n'):
-            if line.startswith('diff --git'):
-                if current_file and current_diff:
-                    diffs_by_file[current_file] = '\n'.join(current_diff)
-                    current_diff = []
-                # Extract filename
-                parts = line.split(' ')
-                if len(parts) >= 3:
-                    file_path = parts[2][2:]  # Remove "b/" prefix
-                    current_file = file_path
-            elif line.startswith('---') or line.startswith('+++'):
-                continue
-            elif current_file:
-                current_diff.append(line)
-        if current_file and current_diff:
-            diffs_by_file[current_file] = '\n'.join(current_diff)
+        # Get the diffs of changed files
+        diffs = get_changed_files(repo_path, base_branch, head_branch, file_extensions)
 
         # Get contextual files
-        manual_content, example_contents = get_contextual_files()
+        manual_content, example_contents = get_contextual_files(repo_path)
 
         # Prepare code snippets and review each file
         all_comments = []
-        for filename, file_diff in diffs_by_file.items():
+        diffs_by_file = {}
+        for diff in diffs:
+            if diff.a_path:
+                filename = diff.a_path
+            else:
+                filename = diff.b_path
+
             print(f"Reviewing {filename}...")
+            diff_content = diff.diff.decode('utf-8', errors='replace')
+            diffs_by_file[filename] = diff_content
+
             llm_response = review_code_with_llm(
                 filename=filename,
-                diff_content=file_diff,
+                diff_content=diff_content,
                 manual_content=manual_content,
                 example_contents=example_contents,
                 api_key=openai_api_key

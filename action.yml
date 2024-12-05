@@ -1,11 +1,16 @@
 name: 'LLM Code Review'
-description: 'Uses OpenAI GPT to review code changes in pull requests.'
+description: 'Uses OpenAI GPT to review code changes'
 inputs:
   OPENAI_API_KEY:
     description: 'OpenAI API Key'
     required: true
+  file_types:
+    description: 'Comma-separated list of file extensions to include (e.g., .py,.js)'
+    required: false
+    default: ''
 runs:
   using: 'docker'
   image: 'Dockerfile'
   args:
     - ${{ inputs.OPENAI_API_KEY }}
+    - ${{ inputs.file_types }}
