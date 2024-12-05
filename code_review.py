@@ -3,7 +3,7 @@ import sys
 import json
 import requests
 from github import Github
-from git import Repo
+from git import Git, Repo
 
 
 def get_contextual_files(repo_path):
@@ -204,8 +204,15 @@ def main():
         repo_path = '/github/workspace'  # Already checked out by actions/checkout
         os.chdir(repo_path)
 
-        # Get the diffs of changed files
-        diffs = get_changed_files(repo_path, base_branch, head_branch, file_extensions)
+        # Configure Git to consider the directory safe
+        git_cmd = Git(repo_path)
+        git_cmd.config('--global', '--add', 'safe.directory', repo_path)
+
+        # Initialize Repo object
+        repo_git = Repo(repo_path)
+
+        # Proceed with your Git operations
+        diffs = get_changed_files(repo_git, base_branch, head_branch, file_extensions)
 
         # Get contextual files
         manual_content, example_contents = get_contextual_files(repo_path)
