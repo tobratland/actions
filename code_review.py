@@ -28,10 +28,32 @@ def get_contextual_files():
 
 def get_changed_files(repo_path, base_branch, head_branch):
     repo = Repo(repo_path)
-    repo.git.fetch()
+    origin = repo.remotes.origin
+
+    # Fetch all branches
+    origin.fetch()
+
+    # Checkout the head branch
+    repo.git.checkout(head_branch)
+
+    # Ensure the base branch is available locally
+    if base_branch not in repo.branches:
+        print(f"Base branch {base_branch} not found locally. Creating it.")
+        repo.create_head(base_branch, origin.refs[base_branch])
+    else:
+        repo.git.checkout(base_branch)
+
+    # Get the common ancestor
     base_commit = repo.merge_base(base_branch, head_branch)
-    diff = repo.git.diff(f'{base_commit[0]}..{head_branch}', '--unified=0')
+    if not base_commit:
+        raise Exception(f"Could not find common ancestor between {base_branch} and {head_branch}")
+
+    print(f"Base commit: {base_commit[0].hexsha}")
+
+    # Get the diff
+    diff = repo.git.diff(f'{base_commit[0].hexsha}..{head_branch}', '--unified=0')
     return diff
+
 
 def review_code_with_llm(filename, diff_content, manual_content, example_contents, api_key):
     prompt = f"""
