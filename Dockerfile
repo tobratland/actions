@@ -3,15 +3,14 @@ FROM python:3.9-slim
 # Install git (needed for git commands)
 RUN apt-get update && apt-get install -y git
 
-# Install necessary Python packages
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
-
-# Copy the action script
-COPY code_review.py /app/code_review.py
-
-# Set the working directory
+# Set the working directory inside the container
 WORKDIR /app
 
-# Run the script
+# Copy the action script and requirements into the image
+COPY code_review.py requirements.txt /app/
+
+# Install necessary Python packages
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Set the entrypoint to run your script
 ENTRYPOINT ["python", "code_review.py"]
