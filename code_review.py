@@ -80,9 +80,12 @@ def get_changed_files(repo, base_branch, head_branch, file_extensions):
             file_path = diff.a_path
         else:
             file_path = diff.b_path
-
+            
         if any(file_path.endswith(ext) for ext in file_extensions):
             print(f"[DEBUG] Including diff for file: {file_path}")
+            print(f"[DEBUG] Diff type: {type(diff)}")  # Add this
+            print(f"[DEBUG] Diff attributes: {dir(diff)}")  # Add this
+            print(f"[DEBUG] Has diff attribute: {hasattr(diff, 'diff')}")  # Add this
             filtered_diffs.append(diff)
         else:
             print(f"[DEBUG] Skipping file not matching extensions: {file_path}")
