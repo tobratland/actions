@@ -429,10 +429,10 @@ comments, diffs, repo_full_name, pr_number, commit_id, github_token
     
 def main():
     try:
+        print("[DEBUG] Starting code review action...")
         openai_api_key = sys.argv[1]
         file_types_input = sys.argv[2] if len(sys.argv) > 2 else ""
         github_token = os.environ.get("GITHUB_TOKEN")
-
             
         if file_types_input:
                 file_extensions = [ext.strip() for ext in file_types_input.split(",")]
