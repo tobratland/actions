@@ -75,6 +75,7 @@ def get_changed_files(repo, base_branch, head_branch, file_extensions):
 
     print("[DEBUG] Filtering diffs by file extensions:", file_extensions)
     filtered_diffs = []
+    diffs_by_file = {}
     for diff in diff_index:
         if diff.a_path:
             file_path = diff.a_path
@@ -83,14 +84,22 @@ def get_changed_files(repo, base_branch, head_branch, file_extensions):
             
         if any(file_path.endswith(ext) for ext in file_extensions):
             print(f"[DEBUG] Including diff for file: {file_path}")
-            print(f"[DEBUG] Diff type: {type(diff)}")  # Add this
-            print(f"[DEBUG] Diff attributes: {dir(diff)}")  # Add this
-            print(f"[DEBUG] Has diff attribute: {hasattr(diff, 'diff')}")  # Add this
+            print(f"[DEBUG] Raw diff type: {type(diff)}")
+            print(f"[DEBUG] Trying to access diff.diff")
             filtered_diffs.append(diff)
+            if hasattr(diff, 'diff'):
+                try:
+                    diff_content = diff.diff.decode("utf-8", errors="replace")
+                    print(f"[DEBUG] Successfully decoded diff content for {file_path}")
+                    diffs_by_file[file_path] = diff_content
+                except Exception as e:
+                    print(f"[DEBUG] Failed to decode diff for {file_path}: {e}")
+            else:
+                print(f"[DEBUG] diff object has no diff attribute!")
         else:
             print(f"[DEBUG] Skipping file not matching extensions: {file_path}")
 
-    return filtered_diffs
+    return filtered_diffs, diffs_by_file
 
 def get_issue_content(repo, issue_number):
     """Fetches the title and body of a given issue."""
@@ -430,7 +439,6 @@ comments, diffs, repo_full_name, pr_number, commit_id, github_token
             print("[DEBUG] Exception content:", str(e))
             # Not exiting here, continuing to next comment
 
-    
 def main():
     try:
         print("[DEBUG] Starting code review action...")
@@ -471,7 +479,7 @@ def main():
         git_cmd.config("--global", "--add", "safe.directory", repo_path)
 
         repo_git = Repo(repo_path)
-        diffs = get_changed_files(repo_git, base_branch, head_branch, file_extensions)
+        diffs, diffs_by_file = get_changed_files(repo_git, base_branch, head_branch, file_extensions)
 
         manual_content, example_contents = get_contextual_files(repo_path)
 
@@ -491,29 +499,19 @@ def main():
 
         # --- Process Diffs ---
         all_comments = []
-        diffs_by_file = {}
         for diff in diffs:
             if diff.a_path:
                 filename = diff.a_path
             else:
                 filename = diff.b_path
 
-            print(f"[DEBUG] Processing {filename}")
-            raw_diff = diff.diff
-            print(f"[DEBUG] raw_diff type: {type(raw_diff)}")
-            print(f"[DEBUG] Raw diff content: {raw_diff!r}")
-            if raw_diff is None:
-                print(f"[DEBUG] Skipping {filename} - no diff content")
+            print(f"Reviewing {filename}...")
+            diff_content = diffs_by_file.get(filename)
+            if not diff_content:
+                print(f"[DEBUG] No diff content found for {filename}, skipping...")
                 continue
 
-            if isinstance(raw_diff, str):
-                diff_content = raw_diff
-            elif isinstance(raw_diff, bytes):
-                diff_content = raw_diff.decode("utf-8", errors="replace")
-            else:
-                print(f"[DEBUG] Unexpected diff type: {type(raw_diff)}")
-                continue
-                        # --- Get Function Definitions ---
+            # --- Get Function Definitions ---
             called_functions = get_called_functions(diff_content)
             function_definitions = ""
             for function_name in called_functions:
