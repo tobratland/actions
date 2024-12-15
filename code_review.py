@@ -497,7 +497,8 @@ def main():
             print(f"Reviewing {filename}...")
             diff_content = diff.diff.decode("utf-8", errors="replace")
             diffs_by_file[filename] = diff_content
-
+            print(f"[DEBUG] diff_content type: {type(diff_content)}")
+            print(f"[DEBUG] diff_content: {diff_content}")
             # --- Get Function Definitions ---
             called_functions = get_called_functions(diff_content)
             function_definitions = ""
