@@ -1,4 +1,3 @@
-      
 import os
 import sys
 import json
@@ -6,7 +5,7 @@ import requests
 from github import Github
 from git import Git, Repo
 import re
-from tiktoken import num_tokens_from_string
+import tiktoken
 import ast  # For more accurate Python parsing
 from functools import lru_cache
 
@@ -21,6 +20,7 @@ MAX_TOKEN_COUNT = int(os.getenv("MAX_TOKEN_COUNT", MAX_TOKEN_COUNT))
 
 
 # --- Helper Functions ---
+
 
 def get_contextual_files(repo_path):
     manual_content = ""
@@ -48,6 +48,7 @@ def get_contextual_files(repo_path):
         print("[DEBUG] No examples directory found.")
 
     return manual_content, example_contents
+
 
 def get_changed_files(repo, base_branch, head_branch, file_extensions):
     origin = repo.remotes.origin
@@ -81,13 +82,13 @@ def get_changed_files(repo, base_branch, head_branch, file_extensions):
             file_path = diff.a_path
         else:
             file_path = diff.b_path
-            
+
         if any(file_path.endswith(ext) for ext in file_extensions):
             print(f"[DEBUG] Including diff for file: {file_path}")
             print(f"[DEBUG] Raw diff type: {type(diff)}")
             print(f"[DEBUG] Trying to access diff.diff")
             filtered_diffs.append(diff)
-            if hasattr(diff, 'diff'):
+            if hasattr(diff, "diff"):
                 try:
                     diff_content = diff.diff.decode("utf-8", errors="replace")
                     print(f"[DEBUG] Successfully decoded diff content for {file_path}")
@@ -101,6 +102,7 @@ def get_changed_files(repo, base_branch, head_branch, file_extensions):
 
     return filtered_diffs, diffs_by_file
 
+
 def get_issue_content(repo, issue_number):
     """Fetches the title and body of a given issue."""
     try:
@@ -109,6 +111,7 @@ def get_issue_content(repo, issue_number):
     except Exception as e:
         print(f"[DEBUG] Error fetching issue #{issue_number}: {e}")
         return None, None
+
 
 @lru_cache(maxsize=CACHE_SIZE)
 def get_function_definitions(repo_path, file_extension, function_name):
@@ -136,6 +139,16 @@ def get_function_definitions(repo_path, file_extension, function_name):
                     print(f"[DEBUG] Error reading file {filepath}: {e}")
     return function_definitions
 
+def num_tokens_from_string(string: str, encoding_name: str) -> int:
+    """Returns the number of tokens in a text string."""
+    try:
+        encoding = tiktoken.encoding_for_model(encoding_name)
+    except KeyError:
+        print(f"[DEBUG] Model {encoding_name} not found. Defaulting to cl100k_base.")
+        encoding = tiktoken.get_encoding("cl100k_base")
+    num_tokens = len(encoding.encode(string))
+    return num_tokens
+
 def extract_python_function_def(content, function_name, filename):
     """Extracts a Python function definition using the ast module."""
     try:
@@ -162,6 +175,7 @@ def extract_python_function_def(content, function_name, filename):
         return ""
     return ""
 
+
 def extract_function_def_regex(content, function_name, filename):
     """
     Extracts function definition using regex (fallback for non-Python files).
@@ -184,21 +198,22 @@ def extract_function_def_regex(content, function_name, filename):
             return ""
     return ""
 
+
 def get_called_functions(diff_content):
     """
     Extracts function names that are called in the diff content.
     """
     print(f"[DEBUG] get_called_functions input type: {type(diff_content)}")
-    
+
     if not isinstance(diff_content, str):
         print("[DEBUG] diff_content is not a string!")
-        if hasattr(diff_content, 'decode'):
+        if hasattr(diff_content, "decode"):
             print("[DEBUG] attempting to decode diff_content...")
-            diff_content = diff_content.decode('utf-8', errors='replace')
+            diff_content = diff_content.decode("utf-8", errors="replace")
         else:
             print("[DEBUG] diff_content has no decode method")
             return set()
-            
+
     called_functions = set()
     for line in diff_content.split("\n"):
         if line.startswith("+"):
@@ -207,21 +222,20 @@ def get_called_functions(diff_content):
                 called_functions.add(match)
     return called_functions
 
+
 def split_diff_into_chunks(diff_content, max_tokens):
     """Splits the diff content into chunks that are within the token limit."""
     chunks = []
     current_chunk = ""
     for line in diff_content.split("\n"):
-        if (
-            num_tokens_from_string(current_chunk + line, ENCODING_MODEL)
-            > max_tokens
-        ):
+        if num_tokens_from_string(current_chunk + line, ENCODING_MODEL) > max_tokens:
             chunks.append(current_chunk)
             current_chunk = line + "\n"
         else:
             current_chunk += line + "\n"
     chunks.append(current_chunk)
     return chunks
+
 
 def review_code_with_llm(
     filename,
@@ -305,11 +319,10 @@ def review_code_with_llm(
     }}
     """
 
-        
     headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        }
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
     payload = {
         "model": "gpt-4o",
         "messages": [{"role": "user", "content": prompt}],
@@ -339,7 +352,6 @@ def get_position_in_diff(diff, target_line):
     current_line = None
     current_position = 0
 
-        
     for line in diff_lines:
         # Reset position counting at each hunk header
         if line.startswith("@@"):
@@ -376,13 +388,10 @@ def get_position_in_diff(diff, target_line):
 
     return position
 
-    
-def post_comments(
-comments, diffs, repo_full_name, pr_number, commit_id, github_token
-):
+
+def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_token):
     from github import GithubException
 
-        
     g = Github(github_token)
     repo = g.get_repo(repo_full_name)
 
@@ -439,15 +448,16 @@ comments, diffs, repo_full_name, pr_number, commit_id, github_token
             print("[DEBUG] Exception content:", str(e))
             # Not exiting here, continuing to next comment
 
+
 def main():
     try:
         print("[DEBUG] Starting code review action...")
         openai_api_key = sys.argv[1]
         file_types_input = sys.argv[2] if len(sys.argv) > 2 else ""
         github_token = os.environ.get("GITHUB_TOKEN")
-            
+
         if file_types_input:
-                file_extensions = [ext.strip() for ext in file_types_input.split(",")]
+            file_extensions = [ext.strip() for ext in file_types_input.split(",")]
         else:
             file_extensions = []
         print("[DEBUG] File extensions:", file_extensions)
@@ -479,7 +489,9 @@ def main():
         git_cmd.config("--global", "--add", "safe.directory", repo_path)
 
         repo_git = Repo(repo_path)
-        diffs, diffs_by_file = get_changed_files(repo_git, base_branch, head_branch, file_extensions)
+        diffs, diffs_by_file = get_changed_files(
+            repo_git, base_branch, head_branch, file_extensions
+        )
 
         manual_content, example_contents = get_contextual_files(repo_path)
 
@@ -567,6 +579,7 @@ def main():
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
