@@ -429,7 +429,7 @@ comments, diffs, repo_full_name, pr_number, commit_id, github_token
     
 def main():
     try:
-        openai_api_key = os.environ.get("OPENAI_API_KEY")
+        openai_api_key = sys.argv[1]
         file_types_input = sys.argv[2] if len(sys.argv) > 2 else ""
         github_token = os.environ.get("GITHUB_TOKEN")
 
