@@ -499,11 +499,17 @@ def main():
                 filename = diff.b_path
 
             print(f"Reviewing {filename}...")
-            diff_content = diff.diff.decode("utf-8", errors="replace")
-            diffs_by_file[filename] = diff_content
-            print(f"[DEBUG] diff_content type: {type(diff_content)}")
-            print(f"[DEBUG] diff_content: {diff_content}")
-            # --- Get Function Definitions ---
+            # Add debug prints and safe handling
+            print(f"[DEBUG] diff.diff type: {type(diff.diff)}")
+            if isinstance(diff.diff, bytes):
+                diff_content = diff.diff.decode("utf-8", errors="replace")
+            elif isinstance(diff.diff, str):
+                diff_content = diff.diff
+            else:
+                print(f"[DEBUG] Unexpected diff.diff type: {type(diff.diff)}")
+                print(f"[DEBUG] diff.diff: {diff.diff}")
+                continue
+                    # --- Get Function Definitions ---
             called_functions = get_called_functions(diff_content)
             function_definitions = ""
             for function_name in called_functions:
