@@ -499,21 +499,20 @@ def main():
                 filename = diff.b_path
 
             print(f"[DEBUG] Processing {filename}")
-            try:
-                raw_diff = diff.diff
-                print(f"[DEBUG] raw_diff type: {type(raw_diff)}")
-                if raw_diff is None:
-                    print(f"[DEBUG] Skipping {filename} - no diff content")
-                    continue
+            raw_diff = diff.diff
+            print(f"[DEBUG] raw_diff type: {type(raw_diff)}")
+            if raw_diff is None:
+                print(f"[DEBUG] Skipping {filename} - no diff content")
+                continue
 
-                if isinstance(raw_diff, str):
-                    diff_content = raw_diff
-                elif isinstance(raw_diff, bytes):
-                    diff_content = raw_diff.decode("utf-8", errors="replace")
-                else:
-                    print(f"[DEBUG] Unexpected diff type: {type(raw_diff)}")
-                    continue
-                            # --- Get Function Definitions ---
+            if isinstance(raw_diff, str):
+                diff_content = raw_diff
+            elif isinstance(raw_diff, bytes):
+                diff_content = raw_diff.decode("utf-8", errors="replace")
+            else:
+                print(f"[DEBUG] Unexpected diff type: {type(raw_diff)}")
+                continue
+                        # --- Get Function Definitions ---
             called_functions = get_called_functions(diff_content)
             function_definitions = ""
             for function_name in called_functions:
