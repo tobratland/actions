@@ -11,10 +11,14 @@ import ast  # For more accurate Python parsing
 from functools import lru_cache
 
 # --- Constants ---
-MAX_TOKEN_COUNT = 3000  # Adjustable, consider making it an input
-ENCODING_MODEL = "gpt-4o"  # Adjustable
-FUNCTION_DEF_TOKEN_LIMIT = 1000  # Limit for function definitions
+MAX_TOKEN_COUNT = 6000  # Adjustable, consider making it an input
+ENCODING_MODEL = "gpt-4o-mini"  # Adjustable
+FUNCTION_DEF_TOKEN_LIMIT = 2000  # Limit for function definitions
 CACHE_SIZE = 128  # For LRU caching
+
+
+MAX_TOKEN_COUNT = int(os.getenv("MAX_TOKEN_COUNT", MAX_TOKEN_COUNT))
+
 
 # --- Helper Functions ---
 
@@ -425,7 +429,7 @@ comments, diffs, repo_full_name, pr_number, commit_id, github_token
     
 def main():
     try:
-        openai_api_key = sys.argv[1]
+        openai_api_key = os.environ.get("OPENAI_API_KEY")
         file_types_input = sys.argv[2] if len(sys.argv) > 2 else ""
         github_token = os.environ.get("GITHUB_TOKEN")
 
