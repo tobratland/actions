@@ -501,6 +501,7 @@ def main():
             print(f"[DEBUG] Processing {filename}")
             raw_diff = diff.diff
             print(f"[DEBUG] raw_diff type: {type(raw_diff)}")
+            print(f"[DEBUG] Raw diff content: {raw_diff!r}")
             if raw_diff is None:
                 print(f"[DEBUG] Skipping {filename} - no diff content")
                 continue
