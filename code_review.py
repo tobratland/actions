@@ -179,6 +179,17 @@ def get_called_functions(diff_content):
     """
     Extracts function names that are called in the diff content.
     """
+    print(f"[DEBUG] get_called_functions input type: {type(diff_content)}")
+    
+    if not isinstance(diff_content, str):
+        print("[DEBUG] diff_content is not a string!")
+        if hasattr(diff_content, 'decode'):
+            print("[DEBUG] attempting to decode diff_content...")
+            diff_content = diff_content.decode('utf-8', errors='replace')
+        else:
+            print("[DEBUG] diff_content has no decode method")
+            return set()
+            
     called_functions = set()
     for line in diff_content.split("\n"):
         if line.startswith("+"):
@@ -186,16 +197,6 @@ def get_called_functions(diff_content):
             for match in matches:
                 called_functions.add(match)
     return called_functions
-
-def num_tokens_from_string(string: str, encoding_name: str) -> int:
-    """Returns the number of tokens in a text string."""
-    try:
-        encoding = tiktoken.encoding_for_model(encoding_name)
-    except KeyError:
-        print(f"[DEBUG] Model {encoding_name} not found. Defaulting to cl100k_base.")
-        encoding = tiktoken.get_encoding("cl100k_base")
-    num_tokens = len(encoding.encode(string))
-    return num_tokens
 
 def split_diff_into_chunks(diff_content, max_tokens):
     """Splits the diff content into chunks that are within the token limit."""
