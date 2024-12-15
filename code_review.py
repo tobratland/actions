@@ -6,7 +6,7 @@ import requests
 from github import Github
 from git import Git, Repo
 import re
-import tiktoken
+from tiktoken import num_tokens_from_string
 import ast  # For more accurate Python parsing
 from functools import lru_cache
 
