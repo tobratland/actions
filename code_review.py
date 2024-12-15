@@ -534,7 +534,10 @@ def main():
 
         # --- Get Issue Context ---
         issue_title, issue_body = None, None
-        match = re.search(r"closes\s*#(\d+)", pr.body, re.IGNORECASE)
+        if pr.body is not None:
+            match = re.search(r"closes\s*#(\d+)", pr.body, re.IGNORECASE) 
+        else:
+            match = None
         if match:
             issue_number = int(match.group(1))
             issue_title, issue_body = get_issue_content(repo, issue_number)

@@ -61,6 +61,135 @@ class TestCodeReviewAction(unittest.TestCase):
             mock_diff.diff = str(content).encode(encoding)
             
         return mock_diff
+    
+    def test_get_changed_files_production_scenario(self):
+        """Test the actual production scenario where the error occurs"""
+        # Arrange
+        file_extensions = ['.rs', '.md', '.toml']
+        
+        # Create mock diffs as they appear in production
+        mock_diff_1 = Mock(spec=git.Diff)
+        mock_diff_1.a_path = "2024/day_04/Cargo.toml"
+        mock_diff_1.b_path = "2024/day_04/Cargo.toml"
+        # Don't set diff attribute yet - simulating production behavior
+        
+        mock_diff_2 = Mock(spec=git.Diff)
+        mock_diff_2.a_path = "2024/day_04/src/lib.rs"
+        mock_diff_2.b_path = "2024/day_04/src/lib.rs"
+        # Don't set diff attribute yet - simulating production behavior
+        
+        self.mock_base_commit.diff.return_value = [mock_diff_1, mock_diff_2]
+        
+        # Act & Assert
+        try:
+            filtered_diffs, diffs_by_file = get_changed_files(
+                self.mock_repo, "main", "feature", file_extensions
+            )
+            print("[DEBUG] Successfully processed diffs")
+            self.assertEqual(len(filtered_diffs), 2)
+            self.assertIn("2024/day_04/Cargo.toml", diffs_by_file)
+            self.assertIn("2024/day_04/src/lib.rs", diffs_by_file)
+        except Exception as e:
+            self.fail(f"get_changed_files raised an exception: {str(e)}")
+
+    def test_get_called_functions_production_scenario(self):
+        """Test function call detection with production-like input"""
+        test_cases = [
+            (None, set()),  # Handle None input
+            (b"", set()),   # Handle empty bytes
+            ("", set()),    # Handle empty string
+            (
+                """@@ -1,3 +1,4 @@
+                +fn new_function() {
+                -fn old_function() {
+                    println!("Hello");
+                }""",
+                {"new_function"}
+            ),
+            (
+                b"""@@ -1,3 +1,4 @@
+                +fn new_function() {
+                -fn old_function() {
+                    println!("Hello");
+                }""",
+                {"new_function"}
+            ),
+            # Test indentation cases
+            (
+                b"+    fn indented_function() {",
+                {"indented_function"}
+            ),
+            (
+                b"+fn no_indent_function() {",
+                {"no_indent_function"}
+            ),
+        ]
+        
+        for input_content, expected_functions in test_cases:
+            with self.subTest(input_content=input_content):
+                result = get_called_functions(input_content)
+                self.assertEqual(result, expected_functions, 
+                            f"Failed for input: {input_content}")
+
+    def test_get_changed_files_with_missing_diff(self):
+        """Test handling of diffs without diff attribute or content"""
+        # Arrange
+        file_extensions = ['.rs']
+        mock_diff = Mock(spec=git.Diff)
+        mock_diff.a_path = "test.rs"
+        mock_diff.b_path = "test.rs"
+        
+        # Make accessing diff attribute raise AttributeError
+        def raise_attribute_error(_):
+            raise AttributeError("'Diff' object has no attribute 'diff'")
+        
+        mock_diff.__getattr__ = raise_attribute_error
+        
+        self.mock_base_commit.diff.return_value = [mock_diff]
+        
+        # Make git.diff() fail to force the error path
+        def raise_type_error(*args, **kwargs):
+            raise TypeError("expected string or bytes-like object")
+        
+        self.mock_repo.git.diff = raise_type_error
+        
+        # Act & Assert
+        with self.assertRaises(TypeError) as context:
+            filtered_diffs, diffs_by_file = get_changed_files(
+                self.mock_repo, "main", "feature", file_extensions
+            )
+        
+        self.assertEqual(str(context.exception), 
+                        "expected string or bytes-like object")
+
+    def test_get_changed_files_with_missing_diff_and_raw_bytes(self):
+        """Test handling of diffs when primary method fails but raw bytes exist"""
+        # Arrange
+        file_extensions = ['.rs']
+        mock_diff = Mock(spec=git.Diff)
+        mock_diff.a_path = "test.rs"
+        mock_diff.b_path = "test.rs"
+        
+        # Simulate malformed bytes content
+        class MalformedBytes:
+            def decode(self, *args, **kwargs):
+                raise TypeError("expected string or bytes-like object")
+        
+        mock_diff.diff = MalformedBytes()
+        
+        self.mock_base_commit.diff.return_value = [mock_diff]
+        
+        # Make git.diff() fail to ensure we're using the primary diff content
+        self.mock_repo.git.diff.side_effect = TypeError("should not be called")
+        
+        # Act & Assert
+        with self.assertRaises(TypeError) as context:
+            filtered_diffs, diffs_by_file = get_changed_files(
+                self.mock_repo, "main", "feature", file_extensions
+            )
+        
+        self.assertEqual(str(context.exception), 
+                        "expected string or bytes-like object")
 
     def test_get_changed_files_with_string_diff(self):
         """Test handling of string diff content"""
