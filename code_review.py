@@ -77,26 +77,38 @@ def get_changed_files(repo, base_branch, head_branch, file_extensions):
     print("[DEBUG] Filtering diffs by file extensions:", file_extensions)
     filtered_diffs = []
     diffs_by_file = {}
+    
     for diff in diff_index:
-        if diff.a_path:
-            file_path = diff.a_path
-        else:
-            file_path = diff.b_path
-
+        file_path = diff.a_path if diff.a_path else diff.b_path
+            
         if any(file_path.endswith(ext) for ext in file_extensions):
             print(f"[DEBUG] Including diff for file: {file_path}")
-            print(f"[DEBUG] Raw diff type: {type(diff)}")
-            print(f"[DEBUG] Trying to access diff.diff")
-            filtered_diffs.append(diff)
-            if hasattr(diff, "diff"):
-                try:
-                    diff_content = diff.diff.decode("utf-8", errors="replace")
-                    print(f"[DEBUG] Successfully decoded diff content for {file_path}")
-                    diffs_by_file[file_path] = diff_content
-                except Exception as e:
-                    print(f"[DEBUG] Failed to decode diff for {file_path}: {e}")
-            else:
-                print(f"[DEBUG] diff object has no diff attribute!")
+            
+            # Ensure we're working with string content
+            try:
+                # First try to get the diff content as a string
+                if hasattr(diff, 'diff'):
+                    if isinstance(diff.diff, str):
+                        diff_content = diff.diff
+                    else:
+                        diff_content = diff.diff.decode('utf-8', errors='replace')
+                else:
+                    # Fallback to using git.diff() directly
+                    diff_content = repo.git.diff(
+                        base_commit[0].hexsha,
+                        head_branch,
+                        '--',
+                        file_path,
+                        encoding='utf-8'
+                    )
+                
+                print(f"[DEBUG] Successfully processed diff content for {file_path}")
+                filtered_diffs.append(diff)
+                diffs_by_file[file_path] = diff_content
+                
+            except Exception as e:
+                print(f"[DEBUG] Error processing diff for {file_path}: {str(e)}")
+                continue
         else:
             print(f"[DEBUG] Skipping file not matching extensions: {file_path}")
 
@@ -202,24 +214,33 @@ def extract_function_def_regex(content, function_name, filename):
 def get_called_functions(diff_content):
     """
     Extracts function names that are called in the diff content.
+    Now handles both string and bytes input safely.
     """
     print(f"[DEBUG] get_called_functions input type: {type(diff_content)}")
-
+    
+    # Ensure we're working with a string
     if not isinstance(diff_content, str):
-        print("[DEBUG] diff_content is not a string!")
-        if hasattr(diff_content, "decode"):
-            print("[DEBUG] attempting to decode diff_content...")
-            diff_content = diff_content.decode("utf-8", errors="replace")
-        else:
-            print("[DEBUG] diff_content has no decode method")
+        try:
+            if hasattr(diff_content, 'decode'):
+                print("[DEBUG] Decoding diff_content to string...")
+                diff_content = diff_content.decode('utf-8', errors='replace')
+            else:
+                print("[DEBUG] Converting diff_content to string...")
+                diff_content = str(diff_content)
+        except Exception as e:
+            print(f"[DEBUG] Error converting diff_content to string: {str(e)}")
             return set()
-
+    
     called_functions = set()
-    for line in diff_content.split("\n"):
-        if line.startswith("+"):
-            matches = re.findall(r"(\w+)\s*\(", line)
-            for match in matches:
-                called_functions.add(match)
+    try:
+        for line in diff_content.split("\n"):
+            if line.startswith("+"):
+                # Look for function calls (identifiers followed by parentheses)
+                matches = re.findall(r"(\w+)\s*\(", line)
+                called_functions.update(matches)
+    except Exception as e:
+        print(f"[DEBUG] Error parsing diff content: {str(e)}")
+        
     return called_functions
 
 
@@ -237,6 +258,7 @@ def split_diff_into_chunks(diff_content, max_tokens):
     return chunks
 
 
+
 def review_code_with_llm(
     filename,
     diff_content,
@@ -247,29 +269,44 @@ def review_code_with_llm(
     api_key,
 ):
     """
-    Reviews a code diff using an LLM, with handling for large files.
+    Reviews a code diff using an LLM, with improved error handling for diff content.
     """
+    # Ensure diff_content is a string
+    if not isinstance(diff_content, str):
+        try:
+            if hasattr(diff_content, 'decode'):
+                diff_content = diff_content.decode('utf-8', errors='replace')
+            else:
+                diff_content = str(diff_content)
+        except Exception as e:
+            print(f"[DEBUG] Error converting diff_content to string in review_code_with_llm: {str(e)}")
+            return []
+
     # Add line numbers to diff content
     numbered_diff = []
     current_line = 0
-    for line in diff_content.split("\n"):
-        if line.startswith("@@"):
-            # Parse the @@ line to get new starting line number
-            match = re.search(r"\+(\d+)", line)
-            if match:
-                current_line = int(match.group(1)) - 1
-            numbered_diff.append(line)
-        elif line.startswith("+"):
-            current_line += 1
-            numbered_diff.append(f"{current_line:4d} | {line}")
-        elif line.startswith("-"):
-            numbered_diff.append(line)
-        else:
-            current_line += 1
-            numbered_diff.append(f"{current_line:4d} | {line}")
+    
+    try:
+        for line in diff_content.split("\n"):
+            if line.startswith("@@"):
+                # Parse the @@ line to get new starting line number
+                match = re.search(r"\+(\d+)", line)
+                if match:
+                    current_line = int(match.group(1)) - 1
+                numbered_diff.append(line)
+            elif line.startswith("+"):
+                current_line += 1
+                numbered_diff.append(f"{current_line:4d} | {line}")
+            elif line.startswith("-"):
+                numbered_diff.append(line)
+            else:
+                current_line += 1
+                numbered_diff.append(f"{current_line:4d} | {line}")
+    except Exception as e:
+        print(f"[DEBUG] Error processing diff lines: {str(e)}")
+        return []
 
     numbered_diff_content = "\n".join(numbered_diff)
-
     diff_chunks = split_diff_into_chunks(numbered_diff_content, MAX_TOKEN_COUNT)
     all_feedback = []
 
