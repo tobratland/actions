@@ -1,3 +1,4 @@
+      
 import os
 import sys
 import json
@@ -5,7 +6,17 @@ import requests
 from github import Github
 from git import Git, Repo
 import re
+import tiktoken
+import ast  # For more accurate Python parsing
+from functools import lru_cache
 
+# --- Constants ---
+MAX_TOKEN_COUNT = 3000  # Adjustable, consider making it an input
+ENCODING_MODEL = "gpt-4o"  # Adjustable
+FUNCTION_DEF_TOKEN_LIMIT = 1000  # Limit for function definitions
+CACHE_SIZE = 128  # For LRU caching
+
+# --- Helper Functions ---
 
 def get_contextual_files(repo_path):
     manual_content = ""
@@ -33,7 +44,6 @@ def get_contextual_files(repo_path):
         print("[DEBUG] No examples directory found.")
 
     return manual_content, example_contents
-
 
 def get_changed_files(repo, base_branch, head_branch, file_extensions):
     origin = repo.remotes.origin
@@ -75,10 +85,139 @@ def get_changed_files(repo, base_branch, head_branch, file_extensions):
 
     return filtered_diffs
 
+def get_issue_content(repo, issue_number):
+    """Fetches the title and body of a given issue."""
+    try:
+        issue = repo.get_issue(number=issue_number)
+        return issue.title, issue.body
+    except Exception as e:
+        print(f"[DEBUG] Error fetching issue #{issue_number}: {e}")
+        return None, None
+
+@lru_cache(maxsize=CACHE_SIZE)
+def get_function_definitions(repo_path, file_extension, function_name):
+    """
+    Finds function definitions in the repository using AST for Python, and falls back to regex for others.
+    Caches results using @lru_cache.
+    """
+    function_definitions = ""
+    for root, _, files in os.walk(repo_path):
+        for file in files:
+            if file.endswith(file_extension):
+                filepath = os.path.join(root, file)
+                try:
+                    with open(filepath, "r") as f:
+                        content = f.read()
+                        if file_extension == ".py":
+                            function_definitions += extract_python_function_def(
+                                content, function_name, file
+                            )
+                        else:
+                            function_definitions += extract_function_def_regex(
+                                content, function_name, file
+                            )
+                except Exception as e:
+                    print(f"[DEBUG] Error reading file {filepath}: {e}")
+    return function_definitions
+
+def extract_python_function_def(content, function_name, filename):
+    """Extracts a Python function definition using the ast module."""
+    try:
+        tree = ast.parse(content)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.name == function_name:
+                    # Get the function definition's source code
+                    func_def = ast.get_source_segment(content, node)
+                    num_tokens = num_tokens_from_string(func_def, ENCODING_MODEL)
+
+                    if num_tokens <= FUNCTION_DEF_TOKEN_LIMIT:
+                        return (
+                            f"\n\n--- Function Definition (File: {filename}) ---\n"
+                            + func_def
+                        )
+                    else:
+                        print(
+                            f"[DEBUG] Function {function_name} in {filename} exceeds token limit. Skipping."
+                        )
+                        return ""
+    except SyntaxError as e:
+        print(f"[DEBUG] Syntax error in {filename}: {e}")
+        return ""
+    return ""
+
+def extract_function_def_regex(content, function_name, filename):
+    """
+    Extracts function definition using regex (fallback for non-Python files).
+    """
+    pattern = rf"^(def|function)\s+{function_name}\s*\(.*\).*{{"  # Python, JavaScript
+    match = re.search(pattern, content, re.MULTILINE)
+    if match:
+        start = match.start()
+        end = content.find("\n\n", start)  # Look for the next empty line
+        if end == -1:
+            end = len(content)
+        func_def = content[start:end]
+        num_tokens = num_tokens_from_string(func_def, ENCODING_MODEL)
+        if num_tokens <= FUNCTION_DEF_TOKEN_LIMIT:
+            return f"\n\n--- Function Definition (File: {filename}) ---\n" + func_def
+        else:
+            print(
+                f"[DEBUG] Function {function_name} in {filename} exceeds token limit. Skipping."
+            )
+            return ""
+    return ""
+
+def get_called_functions(diff_content):
+    """
+    Extracts function names that are called in the diff content.
+    """
+    called_functions = set()
+    for line in diff_content.split("\n"):
+        if line.startswith("+"):
+            matches = re.findall(r"(\w+)\s*\(", line)
+            for match in matches:
+                called_functions.add(match)
+    return called_functions
+
+def num_tokens_from_string(string: str, encoding_name: str) -> int:
+    """Returns the number of tokens in a text string."""
+    try:
+        encoding = tiktoken.encoding_for_model(encoding_name)
+    except KeyError:
+        print(f"[DEBUG] Model {encoding_name} not found. Defaulting to cl100k_base.")
+        encoding = tiktoken.get_encoding("cl100k_base")
+    num_tokens = len(encoding.encode(string))
+    return num_tokens
+
+def split_diff_into_chunks(diff_content, max_tokens):
+    """Splits the diff content into chunks that are within the token limit."""
+    chunks = []
+    current_chunk = ""
+    for line in diff_content.split("\n"):
+        if (
+            num_tokens_from_string(current_chunk + line, ENCODING_MODEL)
+            > max_tokens
+        ):
+            chunks.append(current_chunk)
+            current_chunk = line + "\n"
+        else:
+            current_chunk += line + "\n"
+    chunks.append(current_chunk)
+    return chunks
 
 def review_code_with_llm(
-    filename, diff_content, manual_content, example_contents, api_key
+    filename,
+    diff_content,
+    manual_content,
+    example_contents,
+    issue_content,
+    function_definitions,
+    api_key,
 ):
+    """
+    Reviews a code diff using an LLM, with handling for large files.
+    """
     # Add line numbers to diff content
     numbered_diff = []
     current_line = 0
@@ -100,41 +239,60 @@ def review_code_with_llm(
 
     numbered_diff_content = "\n".join(numbered_diff)
 
-    prompt = f"""
-You are a code reviewer. Base your review on best practices for safe and efficient code. Give examples where applicable, and reference the developer manual or examples, if they exist, for more information.
-Your code review should be actionable and provide clear feedback to the developer, including suggestions for improvement.
+    diff_chunks = split_diff_into_chunks(numbered_diff_content, MAX_TOKEN_COUNT)
+    all_feedback = []
 
-Below is the developer manual and examples(they may be empty). :
+    for chunk_index, diff_chunk in enumerate(diff_chunks):
+        prompt = f"""
+    You are a code reviewer. Base your review on best practices for safe and efficient code. Give examples where applicable, and reference the developer manual or examples, if they exist, for more information.
+    Your code review should be actionable and provide clear feedback to the developer, including suggestions for improvement.
+    **Provide in-line code suggestions where appropriate using the following format:**
+    ```suggestion
+    # Your suggested code here
 
-Developer Manual:
-{manual_content}
+        
 
-Examples:
-{example_contents}
+    Use code with caution.Python
 
-Now, review the following code diff. Line numbers are shown at the start of each line:
+    Task Context (if applicable):
+    {issue_content}
 
-File: {filename}
-Diff:
-{numbered_diff_content}
+    Below is the developer manual and examples (they may be empty):
 
-Provide your feedback in the following JSON format:
-{{
-  "filename": "{filename}",
-  "comments": [
+    Developer Manual:
+    {manual_content}
+
+    Examples:
+    {example_contents}
+
+    Function Definitions (if found):
+    {function_definitions}
+
+    Now, review the following code diff. Line numbers are shown at the start of each line:
+
+    File: {filename} (Chunk {chunk_index + 1} of {len(diff_chunks)})
+    Diff:
+    {diff_chunk}
+
+    Provide your feedback in the following JSON format:
     {{
-      "line": integer,  # Use the line numbers shown in the diff
-      "comment": "string"
+    "filename": "{filename}",
+    "chunk": {chunk_index + 1},
+    "comments": [
+    {{
+    "line": integer, # Use the line numbers shown in the diff
+    "comment": "string"
     }},
     ...
-  ]
-}}
-"""
+    ]
+    }}
+    """
 
+        
     headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}",
-    }
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        }
     payload = {
         "model": "gpt-4o",
         "messages": [{"role": "user", "content": prompt}],
@@ -142,10 +300,19 @@ Provide your feedback in the following JSON format:
     }
 
     response = requests.post(
-        "https://api.openai.com/v1/chat/completions", headers=headers, json=payload
+        "https://api.openai.com/v1/chat/completions",
+        headers=headers,
+        json=payload,
     )
 
-    return response.json()
+    try:
+        response_json = response.json()
+        all_feedback.append(response_json)
+    except Exception as e:
+        print(f"[DEBUG] Error parsing LLM response: {e}")
+        print(f"[DEBUG] Response content: {response.text}")
+
+    return all_feedback
 
 
 def get_position_in_diff(diff, target_line):
@@ -155,6 +322,7 @@ def get_position_in_diff(diff, target_line):
     current_line = None
     current_position = 0
 
+        
     for line in diff_lines:
         # Reset position counting at each hunk header
         if line.startswith("@@"):
@@ -191,10 +359,13 @@ def get_position_in_diff(diff, target_line):
 
     return position
 
-
-def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_token):
+    
+def post_comments(
+comments, diffs, repo_full_name, pr_number, commit_id, github_token
+):
     from github import GithubException
 
+        
     g = Github(github_token)
     repo = g.get_repo(repo_full_name)
 
@@ -251,15 +422,16 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
             print("[DEBUG] Exception content:", str(e))
             # Not exiting here, continuing to next comment
 
-
+    
 def main():
     try:
         openai_api_key = sys.argv[1]
         file_types_input = sys.argv[2] if len(sys.argv) > 2 else ""
         github_token = os.environ.get("GITHUB_TOKEN")
 
+            
         if file_types_input:
-            file_extensions = [ext.strip() for ext in file_types_input.split(",")]
+                file_extensions = [ext.strip() for ext in file_types_input.split(",")]
         else:
             file_extensions = []
         print("[DEBUG] File extensions:", file_extensions)
@@ -295,6 +467,21 @@ def main():
 
         manual_content, example_contents = get_contextual_files(repo_path)
 
+        # --- Get Issue Context ---
+        issue_title, issue_body = None, None
+        match = re.search(r"closes\s*#(\d+)", pr.body, re.IGNORECASE)
+        if match:
+            issue_number = int(match.group(1))
+            issue_title, issue_body = get_issue_content(repo, issue_number)
+            print(f"[DEBUG] Found related issue: #{issue_number}")
+
+        issue_content = ""
+        if issue_title:
+            issue_content += f"Issue Title: {issue_title}\n"
+        if issue_body:
+            issue_content += f"Issue Body: {issue_body}\n"
+
+        # --- Process Diffs ---
         all_comments = []
         diffs_by_file = {}
         for diff in diffs:
@@ -307,38 +494,47 @@ def main():
             diff_content = diff.diff.decode("utf-8", errors="replace")
             diffs_by_file[filename] = diff_content
 
-            print("[DEBUG] Diff content snippet for", filename)
-            for line_idx, dline in enumerate(diff_content.split("\n")[:10]):
-                print(f"   {line_idx}: {dline}")
+            # --- Get Function Definitions ---
+            called_functions = get_called_functions(diff_content)
+            function_definitions = ""
+            for function_name in called_functions:
+                for file_extension in file_extensions:
+                    function_definitions += get_function_definitions(
+                        repo_path, file_extension, function_name
+                    )
 
-            llm_response = review_code_with_llm(
+            llm_responses = review_code_with_llm(
                 filename=filename,
                 diff_content=diff_content,
                 manual_content=manual_content,
                 example_contents=example_contents,
+                issue_content=issue_content,
+                function_definitions=function_definitions,
                 api_key=openai_api_key,
             )
 
-            print("[DEBUG] LLM response:", llm_response)
+            print("[DEBUG] LLM responses:", llm_responses)
 
-            try:
-                llm_text = llm_response["choices"][0]["message"]["content"]
-                json_start = llm_text.find("{")
-                json_end = llm_text.rfind("}") + 1
-                llm_json_str = llm_text[json_start:json_end]
-                feedback = json.loads(llm_json_str)
+            for llm_response in llm_responses:
+                try:
+                    llm_text = llm_response["choices"][0]["message"]["content"]
+                    json_start = llm_text.find("{")
+                    json_end = llm_text.rfind("}") + 1
+                    llm_json_str = llm_text[json_start:json_end]
+                    feedback = json.loads(llm_json_str)
 
-                print("[DEBUG] Parsed feedback JSON:", feedback)
+                    print("[DEBUG] Parsed feedback JSON:", feedback)
 
-                comments = feedback.get("comments", [])
-                for c in comments:
-                    c["filename"] = filename
-                all_comments.extend(comments)
-            except Exception as e:
-                print(f"Error parsing LLM response for {filename}: {e}")
-                if "llm_text" in locals():
-                    print("[DEBUG] LLM text that failed to parse:", llm_text)
-                continue
+                    comments = feedback.get("comments", [])
+                    for c in comments:
+                        c["filename"] = filename
+                    all_comments.extend(comments)
+
+                except Exception as e:
+                    print(f"Error parsing LLM response for {filename}: {e}")
+                    if "llm_text" in locals():
+                        print("[DEBUG] LLM text that failed to parse:", llm_text)
+                    continue
 
         post_comments(
             comments=all_comments,
@@ -355,6 +551,4 @@ def main():
         print(f"Error: {e}")
         sys.exit(1)
 
-
-if __name__ == "__main__":
-    main()
+    
