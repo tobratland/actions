@@ -296,14 +296,6 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
             print("[DEBUG] Exception content:", str(e))
 
 
-def load_prompt_template(filepath):
-    if not os.path.exists(filepath):
-        print("[DEBUG] Prompt template file not found.")
-        return ""
-    with open(filepath, "r") as f:
-        return f.read()
-
-
 def main():
     try:
         print("[DEBUG] Starting code review action...")
@@ -382,8 +374,28 @@ def main():
                     repo_path, file_extension, function_name
                 )
 
-        # Load prompt template
-        prompt_template = load_prompt_template("/github/workspace/prompt-template.txt")
+        # Directly include the prompt template as a string
+        prompt_template = """You are a senior code reviewer. Base your review on best practices for safe and efficient code. Give examples where applicable, and reference the developer manual or examples, if they exist, for more information.
+            Your code review should be actionable and provide clear feedback to the developer, including suggestions for improvement. Its important that the feedback is actionable and that the feedback isnt just a statement of the obvious.
+            If there are any issues with the code, provide a clear and concise explanation of the problem, and suggest a solution. 
+            If there is a task connected to the code, it is the top priority that the task is completed by the pull request, if not you must provide feedback on what is missing to complete it, and if possible a clear path forward.
+            Provide in-line code suggestions where appropriate using the following format:
+
+            ```suggestion
+            # Your suggested code here
+            {ISSUE_CONTENT}
+
+            {MANUAL_CONTENT}
+
+            {EXAMPLES_CONTENT}
+
+            {FUNCTION_DEFINITIONS}
+
+            Below are the combined diffs of all changed files. Each file has its own heading and line numbers start at 1 for that file.
+
+            {DIFF_CONTENT}
+
+            Provide feedback in JSON format: { "comments": [ { "filename": "string", "line": integer, "comment": "string" } ] }"""
 
         # Insert dynamic contents
         prompt = prompt_template.replace("{ISSUE_CONTENT}", issue_content)
@@ -401,7 +413,7 @@ def main():
         diff_chunks = split_diff_into_chunks(prompt, MAX_TOKEN_COUNT)
         all_feedback = []
 
-        # Ideally we want one single prompt to the LLM:
+        # Use the first chunk (ideally everything fits in one prompt)
         review_prompt = diff_chunks[0]
 
         headers = {
@@ -464,7 +476,3 @@ def main():
     except Exception as e:
         print(f"Error: {e}")
         sys.exit(1)
-
-
-if __name__ == "__main__":
-    main()
