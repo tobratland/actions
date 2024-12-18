@@ -257,7 +257,7 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
     commit = repo.get_commit(commit_id)
     print("[DEBUG] Refreshed commit_id to match pr.head.sha:", commit_id)
 
-    print("[DEBUG] Posting comments...")
+    print("[DEBUG] Posting inline comments...")
     print(
         f"[DEBUG] PR Number: {pr_number}, commit_id: {commit_id}, repo_full_name: {repo_full_name}"
     )
@@ -268,7 +268,7 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
         line = comment["line"]
         body = comment["comment"]
 
-        print(f"[DEBUG] Attempting to post comment on {filename} at line {line}")
+        print(f"[DEBUG] Attempting to post inline comment on {filename} at line {line}")
         file_diff = diffs.get(filename)
         if not file_diff:
             print(f"[DEBUG] No diff found for {filename}, skipping this comment.")
@@ -291,7 +291,7 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
         except GithubException as e:
             print(f"GitHub API Error: {e.status}, {e.data}")
         except Exception as e:
-            print("[DEBUG] Generic exception encountered while posting comment")
+            print("[DEBUG] Generic exception encountered while posting inline comment")
             print("[DEBUG] Exception type:", type(e))
             print("[DEBUG] Exception content:", str(e))
 
@@ -374,29 +374,28 @@ def main():
                     repo_path, file_extension, function_name
                 )
 
-        # Directly include the prompt template as a string
-        prompt_template = """You are a senior code reviewer. Base your review on best practices for safe and efficient code. Give examples where applicable, and reference the developer manual or examples, if they exist, for more information.
-                            Your code review should be actionable and provide clear feedback to the developer, including suggestions for improvement. Its important that the feedback is actionable and clear.
-                            If there are any issues with the code, provide a clear and concise explanation of the problem, and suggest a solution. 
-                            If there is a github issue connected to the code, it is the top priority that the github issue is completed by the pull request, if not you must provide feedback on what is missing to complete it, and if possible a clear path forward. if a complete solution to all the parts of the issue is included, provide a single comment that says that the issue is solved.
-            Provide in-line code suggestions where appropriate using the following format:
+            prompt_template = """You are a senior code reviewer. Base your review on best practices for safe and efficient code. Give examples where applicable, and reference the developer manual or examples, if they exist, for more information.
+    Its important that the feedback is actionable and clear.
+    If there are any issues with the code, provide a clear and concise explanation of the problem, and suggest a solution. 
+    If there is a github issue connected to the code, it is the top priority that the github issue is completed by the pull request, if not you must provide feedback on what is missing to complete it, and if possible a clear path forward. if a complete solution to all the parts of the issue is included, provide a single comment that says that the issue is solved.
 
-            ```suggestion
-            # Your suggested code here
-            {ISSUE_CONTENT}
+    Provide in-line code suggestions where appropriate using the following format:
+    ```suggestion
+    # Your suggested code here
+    {ISSUE_CONTENT}
 
-            {MANUAL_CONTENT}
+    {MANUAL_CONTENT}
 
-            {EXAMPLES_CONTENT}
+    {EXAMPLES_CONTENT}
 
-            {FUNCTION_DEFINITIONS}
+    {FUNCTION_DEFINITIONS}
 
-            Below are the combined diffs of all changed files. Each file has its own heading and line numbers start at 1 for that file.
+    Below are the combined diffs of all changed files. Each file has its own heading and line numbers start at 1 for that file.
 
-            {DIFF_CONTENT}
+    {DIFF_CONTENT}
 
-            Provide feedback in JSON format: { "comments": [ { "filename": "string", "line": integer, "comment": "string" } ] ,
-                                                 "issue_comment": [ {"issue": "string", "comment": "string", "how_is_the_issue_solved": "string" } ] }"""
+    Provide feedback in JSON format: { "comments": [ { "filename": "string", "line": integer, "comment": "string" } ], "issue_comment": [ { "issue": "string", "comment": "string", "how_is_the_issue_solved": "string" } ] }"""
+
 
         # Insert dynamic contents
         prompt = prompt_template.replace("{ISSUE_CONTENT}", issue_content)
@@ -409,13 +408,6 @@ def main():
         with open("/github/workspace/prompt_logs.txt", "a") as log_file:
             log_file.write("\n--- Combined Prompt ---\n")
             log_file.write(prompt + "\n")
-
-        # Split into chunks if needed
-        #diff_chunks = split_diff_into_chunks(prompt, MAX_TOKEN_COUNT)
-        all_feedback = []
-
-        # Use the first chunk (ideally everything fits in one prompt)
-        #review_prompt = diff_chunks[0]
 
         headers = {
             "Content-Type": "application/json",
@@ -433,6 +425,7 @@ def main():
             json=payload,
         )
 
+        all_feedback = []
         try:
             response_json = response.json()
             all_feedback.append(response_json)
@@ -441,6 +434,7 @@ def main():
             print(f"[DEBUG] Response content: {response.text}")
 
         all_comments = []
+        issue_comments = []
         for llm_response in all_feedback:
             try:
                 llm_text = llm_response["choices"][0]["message"]["content"]
@@ -451,17 +445,29 @@ def main():
                 print("[DEBUG] Parsed feedback JSON:", feedback)
 
                 comments = feedback.get("comments", [])
-                # Ensure comments have filename and line
                 for c in comments:
                     if "filename" not in c:
                         c["filename"] = "unknown_file"
                 all_comments.extend(comments)
+
+                # Extract issue-level comments
+                issue_comments.extend(feedback.get("issue_comment", []))
+
             except Exception as e:
                 print(f"Error parsing LLM response: {e}")
                 if "llm_text" in locals():
                     print("[DEBUG] LLM text that failed to parse:", llm_text)
                 continue
 
+        # Post top-level issue comments (if any)
+        pull_request = repo.get_pull(pr_number)
+        for ic in issue_comments:
+            issue_comment_body = ic.get("comment", "")
+            if issue_comment_body.strip():
+                print("[DEBUG] Posting top-level issue comment...")
+                pull_request.create_issue_comment(body=issue_comment_body)
+
+        # Now post inline comments
         post_comments(
             comments=all_comments,
             diffs=diffs_by_file,
