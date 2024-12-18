@@ -314,14 +314,10 @@ def review_code_with_llm(
         prompt = f"""
     You are a senior code reviewer. Base your review on best practices for safe and efficient code. Give examples where applicable, and reference the developer manual or examples, if they exist, for more information.
     Your code review should be actionable and provide clear feedback to the developer, including suggestions for improvement. Its important that the feedback is actionable and that the feedback isnt just a statement of the obvious.
-    If there are any issues with the code, provide a clear and concise explanation of the problem, and suggest a solution.
+    If there are any issues with the code, provide a clear and concise explanation of the problem, and suggest a solution. If there is a task connected to the code, its important that the task is completed within the code, if not you must provide feedback on what is missing to complete the task. 
     Provide in-line code suggestions where appropriate using the following format:
     ```suggestion
     # Your suggested code here
-
-        
-
-    Use code with caution.Python
 
     Task Context (if applicable):
     {issue_content}
@@ -362,10 +358,16 @@ def review_code_with_llm(
         "Authorization": f"Bearer {api_key}",
     }
     payload = {
-        "model": "gpt-4o",
+        "model": "gpt-4o-mini",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.2,
     }
+
+            # Save prompt to a local file for logging
+    # This appends the prompt to a file in the workspace
+    with open("/github/workspace/prompt_logs.txt", "a") as log_file:
+        log_file.write(f"\n--- Prompt for file '{filename}' Chunk {chunk_index + 1} ---\n")
+        log_file.write(prompt + "\n")
 
     response = requests.post(
         "https://api.openai.com/v1/chat/completions",
