@@ -416,7 +416,6 @@ def main():
         payload = {
             "model": "o1-mini",
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.2,
         }
 
         response = requests.post(
