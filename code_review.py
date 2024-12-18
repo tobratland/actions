@@ -11,7 +11,7 @@ from functools import lru_cache
 
 # --- Constants ---
 MAX_TOKEN_COUNT = 150000  # adjustable
-ENCODING_MODEL = "gpt-4o-mini"
+ENCODING_MODEL = "o1-mini"
 FUNCTION_DEF_TOKEN_LIMIT = 5000
 CACHE_SIZE = 128
 
@@ -414,7 +414,7 @@ def main():
             "Authorization": f"Bearer {openai_api_key}",
         }
         payload = {
-            "model": "gpt-4o-mini",
+            "model": "o1-mini",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.2,
         }
