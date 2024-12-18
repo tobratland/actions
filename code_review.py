@@ -376,10 +376,9 @@ def main():
 
         # Directly include the prompt template as a string
         prompt_template = """You are a senior code reviewer. Base your review on best practices for safe and efficient code. Give examples where applicable, and reference the developer manual or examples, if they exist, for more information.
-            Your code review should be actionable and provide clear feedback to the developer, including suggestions for improvement. Its important that the feedback is actionable and that the feedback isnt just a statement of the obvious.
-            If there are any issues with the code, provide a clear and concise explanation of the problem, and suggest a solution. 
-            If there is an issue connected to the code, it is the top priority that the issue is completed by the pull request, if not you must provide feedback on what is missing to complete it, and if possible a clear path forward.
-            If there is a issue connected and the code sufficiently addresses the issue, then there should be a comment that the issue has been addressed. 
+                            Your code review should be actionable and provide clear feedback to the developer, including suggestions for improvement. Its important that the feedback is actionable and clear.
+                            If there are any issues with the code, provide a clear and concise explanation of the problem, and suggest a solution. 
+                            If there is a github issue connected to the code, it is the top priority that the github issue is completed by the pull request, if not you must provide feedback on what is missing to complete it, and if possible a clear path forward. if a complete solution to all the parts of the issue is included, provide a single comment that says that the issue is solved.
             Provide in-line code suggestions where appropriate using the following format:
 
             ```suggestion
@@ -396,7 +395,8 @@ def main():
 
             {DIFF_CONTENT}
 
-            Provide feedback in JSON format: { "comments": [ { "filename": "string", "line": integer, "comment": "string" } ] }"""
+            Provide feedback in JSON format: { "comments": [ { "filename": "string", "line": integer, "comment": "string" } ] ,
+                                                 "issue_comment": [ {"issue": "string", "comment": "string", "how_is_the_issue_solved": "string" } ] }"""
 
         # Insert dynamic contents
         prompt = prompt_template.replace("{ISSUE_CONTENT}", issue_content)
