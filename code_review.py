@@ -299,6 +299,7 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
 def load_prompt_template(filepath):
     if not os.path.exists(filepath):
         print("[DEBUG] Prompt template file not found.")
+        os.exit(1)
         return ""
     with open(filepath, "r") as f:
         return f.read()
@@ -383,7 +384,7 @@ def main():
                 )
 
         # Load prompt template
-        prompt_template = load_prompt_template("prompt_template.txt")
+        prompt_template = load_prompt_template("prompt-template.txt")
 
         # Insert dynamic contents
         prompt = prompt_template.replace("{ISSUE_CONTENT}", issue_content)
