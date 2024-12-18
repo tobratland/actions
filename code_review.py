@@ -214,15 +214,8 @@ def split_diff_into_chunks(diff_content, max_tokens):
 
 
 def number_and_combine_diffs(diffs_by_file):
-    """
-    Combine all file diffs into a single string, but number lines per file.
-    For each file:
-    - Print `--- File: filename ---`
-    - Restart line numbering at 1
-    We also keep a map of (filename, display_line -> position_in_diff) for later comment posting.
-    """
     combined_output = []
-    line_maps = {}  # {filename: {display_line: position}}
+    line_maps = {}
     for filename, diff_content in diffs_by_file.items():
         combined_output.append(f"--- File: {filename} ---")
         lines = diff_content.split("\n")
@@ -230,41 +223,20 @@ def number_and_combine_diffs(diffs_by_file):
         position_num = 0
         line_maps[filename] = {}
         
-        # For diff hunks, we track position in the diff.
-        # According to GitHub API, position is counted only on '+' and context lines, not on '-' lines.
-        # Actually, the 'position' is the index of the line in the diff that relates to the 'head' version.
-        # We'll consider the approach that lines starting with '+' or ' ' (context) increase position.
-        
-        current_line_in_file = None
-        
         for line in lines:
-            # Print all lines, including @@, -, +, context
-            # Increment display_line_num for any visible line except maybe the hunk header?
             if line.startswith("@@"):
-                # hunk header lines aren't assigned a display line number
                 combined_output.append(line)
             else:
-                # For actual code lines (-, +, or context):
                 display_line_num += 1
-                # Write line number and line content
                 combined_output.append(f"{display_line_num:4d} | {line}")
                 
-                # Determine if this line corresponds to a 'head' line.
-                # Only '+' and context lines count towards position. '-' lines are original lines, not in head.
                 if line.startswith("+") or (line.startswith(" ") or (not line.startswith("@") and not line.startswith("-") and not line.startswith("+"))):
                     position_num += 1
                     line_maps[filename][display_line_num] = position_num
-                else:
-                    # '-' line does not increment position_num.
-                    pass
-
     return "\n".join(combined_output), line_maps
 
 
 def get_position_in_diff(filename, target_line, line_maps):
-    """
-    Given a filename and a displayed target_line, return the position from the precomputed line_maps.
-    """
     if filename not in line_maps:
         print(f"[DEBUG] No line map found for {filename}")
         return None
@@ -280,7 +252,6 @@ def post_comments(comments, diffs, repo_full_name, pr_number, commit_id, github_
     g = Github(github_token)
     repo = g.get_repo(repo_full_name)
 
-    # Re-fetch the PR to ensure we have the latest head commit
     pull_request = repo.get_pull(pr_number)
     commit_id = pull_request.head.sha
     commit = repo.get_commit(commit_id)
@@ -385,16 +356,19 @@ def main():
             match = re.search(r"closes\s*#(\d+)", pr.body, re.IGNORECASE)
             if match:
                 issue_number = int(match.group(1))
+
+        pr_body = pr.body or ""
+
         if issue_number:
             issue_title, issue_body = get_issue_content(repo, issue_number)
             if issue_title or issue_body:
-                issue_content = f"Issue Title: {issue_title}\nIssue Body: {issue_body}\n"
+                issue_content = f"Issue Title: {issue_title}\nIssue Body: {issue_body}\nPR Body: {pr_body}\n"
             else:
                 print("[DEBUG] Issue found but could not fetch details.")
-                issue_content = "Related issue found but could not fetch details."
+                issue_content = f"Related issue found but could not fetch details.\nPR Body: {pr_body}\n"
         else:
             print("[DEBUG] No related issue found in PR description.")
-            issue_content = "No related issue found."
+            issue_content = f"No related issue found.\nPR Body: {pr_body}\n"
 
         # Combine all diffs with per-file numbering
         combined_diff, line_maps = number_and_combine_diffs(diffs_by_file)
@@ -409,7 +383,7 @@ def main():
                 )
 
         # Load prompt template
-        prompt_template = load_prompt_template("prompt-template.txt")
+        prompt_template = load_prompt_template("/github/workspace/prompt_template.txt")
 
         # Insert dynamic contents
         prompt = prompt_template.replace("{ISSUE_CONTENT}", issue_content)
