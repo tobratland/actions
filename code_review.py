@@ -312,9 +312,10 @@ def review_code_with_llm(
 
     for chunk_index, diff_chunk in enumerate(diff_chunks):
         prompt = f"""
-    You are a code reviewer. Base your review on best practices for safe and efficient code. Give examples where applicable, and reference the developer manual or examples, if they exist, for more information.
-    Your code review should be actionable and provide clear feedback to the developer, including suggestions for improvement.
-    **Provide in-line code suggestions where appropriate using the following format:**
+    You are a senior code reviewer. Base your review on best practices for safe and efficient code. Give examples where applicable, and reference the developer manual or examples, if they exist, for more information.
+    Your code review should be actionable and provide clear feedback to the developer, including suggestions for improvement. Its important that the feedback is actionable and that the feedback isnt just a statement of the obvious.
+    If there are any issues with the code, provide a clear and concise explanation of the problem, and suggest a solution.
+    Provide in-line code suggestions where appropriate using the following format:
     ```suggestion
     # Your suggested code here
 
