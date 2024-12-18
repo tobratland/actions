@@ -437,6 +437,7 @@ def main():
         issue_comments = []
         for llm_response in all_feedback:
             try:
+                print(f"[DEBUG] LLM response: {llm_response}")
                 llm_text = llm_response["choices"][0]["message"]["content"]
                 json_start = llm_text.find("{")
                 json_end = llm_text.rfind("}") + 1
