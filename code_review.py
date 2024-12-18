@@ -383,7 +383,7 @@ def main():
                 )
 
         # Load prompt template
-        prompt_template = load_prompt_template("prompt-template.txt")
+        prompt_template = load_prompt_template("./prompt-template.txt")
 
         # Insert dynamic contents
         prompt = prompt_template.replace("{ISSUE_CONTENT}", issue_content)
