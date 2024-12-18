@@ -410,11 +410,11 @@ def main():
             log_file.write(prompt + "\n")
 
         # Split into chunks if needed
-        diff_chunks = split_diff_into_chunks(prompt, MAX_TOKEN_COUNT)
+        #diff_chunks = split_diff_into_chunks(prompt, MAX_TOKEN_COUNT)
         all_feedback = []
 
         # Use the first chunk (ideally everything fits in one prompt)
-        review_prompt = diff_chunks[0]
+        #review_prompt = diff_chunks[0]
 
         headers = {
             "Content-Type": "application/json",
@@ -422,7 +422,7 @@ def main():
         }
         payload = {
             "model": "gpt-4o-mini",
-            "messages": [{"role": "user", "content": review_prompt}],
+            "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.2,
         }
 
